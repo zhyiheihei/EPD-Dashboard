@@ -238,6 +238,7 @@ class EpdSession:
             protocol.FOOD_BITMAP_WIDTH,
             protocol.FOOD_BITMAP_HEIGHT,
         ),
+        commit_flags: int = protocol.COMMIT_DEFAULT,
     ) -> None:
         """BEGIN → 逐资源 BITMAP（串行，末片等 42 OK）→ COMMIT(03)。"""
         if len(foods) != len(bitmaps):
@@ -271,11 +272,14 @@ class EpdSession:
                         protocol.CMD_BITMAP, transaction, self._cfg.session_timeout
                     )
 
-        await self._write(protocol.build_commit(transaction))
+        await self._write(protocol.build_commit(transaction, commit_flags))
         await self._wait_response(
             protocol.CMD_COMMIT, transaction, self._cfg.session_timeout
         )
-        self._log("COMMIT OK，设备开始刷新")
+        if commit_flags & protocol.COMMIT_PARTIAL:
+            self._log("COMMIT OK，设备开始局部刷新")
+        else:
+            self._log("COMMIT OK，设备开始刷新")
 
     async def abort(self, transaction: int) -> None:
         try:

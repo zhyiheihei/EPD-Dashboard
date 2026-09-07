@@ -74,7 +74,8 @@ curl -s 127.0.0.1:8386/api/health                                               
 | --- | --- |
 | `未找到墨水屏设备` | `bluetoothctl devices` 看广播；`bluetoothctl scan on` 确认 `NRF_EPD_XXXX` 可见；设备上电、在 10m 内 |
 | 推送超时 | `EPD_FOOD_MAX_CHUNK=6` 走保守分片试试（与网页端一致）；缩短设备距离 |
-| 推送成功但屏幕没变 | 三色屏全刷约 15s，等一会；`43 OK` 后服务端已按 settle 等待 |
+| 推送成功但屏幕没变 | 全刷约 15s、局部刷新仅刷新食品栏约 2s；`43 OK` 后服务端已按 settle 等待 |
+| 局部刷新后屏幕周围轻微灰边 | 窗口边界电容串扰（物理特性）；每次推送局部刷新，每 8 次强制全刷 + 每日午夜全刷自动清除 |
 | BLE 失败、D-Bus 权限 | `sudo -u epd-dashboard dbus-send --system --print-reply --dest=org.bluez / org.freedesktop.DBus.Introspectable.Introspect` |
 | 字体方块 | `ls -l /nix/store/*epd-food-cjk-font*`；journal 里 EPD_FOOD_FONT_PATH 是否存在 |
 | 数据库权限 | ensureUsers 已建 `epd-dashboard` 角色；`sudo -u postgres psql -c '\l'` 看 epd_dashboard 属主 |

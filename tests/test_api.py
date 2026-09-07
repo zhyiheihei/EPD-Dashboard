@@ -194,6 +194,8 @@ def make_app(db=None, token: str = TOKEN):
         retry_backoff=0,
         push_on_change=True,
         push_debounce=0,
+        commit_sleep=True,
+        full_refresh_every=8,
         state_dir=Path(tempfile.mkdtemp(prefix="epd-food-test-")),
     )
     app = build_app(cfg, db or FakeDB())

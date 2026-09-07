@@ -85,6 +85,8 @@ epd_food_server/
 | `EPD_FOOD_MAX_CHUNK` | 0=按 MTU 自动 | 单片数据字节上限（调试用 6） |
 | `EPD_FOOD_PUSH_ON_CHANGE` | true | 数据变更后防抖即时推送 |
 | `EPD_FOOD_PUSH_DEBOUNCE` | 10 秒 | 合并连续写入 |
+| `EPD_FOOD_FULL_REFRESH_EVERY` | 8 | 每 N 次推送强制全刷清残影；0 = 始终全刷 |
+| `EPD_FOOD_COMMIT_SLEEP` | true | COMMIT 是否带休眠标志（调试局部刷新用） |
 | `EPD_FOOD_STATE_DIR` | `/var/lib/epd-dashboard` | 锁与推送状态文件目录 |
 
 全部变量见 `server/epd_food_server/config.py`。

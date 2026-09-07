@@ -428,7 +428,8 @@ async def upgrade_on_device(
         log.debug("DFU 通知: %s", data.hex())
 
     try:
-        await client.connect()
+        if not client.is_connected:  # _connect_verified_bootloader 已建链时勿重复连接
+            await client.connect()
     except (TimeoutError, asyncio.TimeoutError) as exc:
         raise DfuError(f"连接 bootloader 超时（{bl_device.name or bl_device.address}）") from exc
     transport = BleakDfuTransport(client, on_notify_raw=raw_notify_sink)

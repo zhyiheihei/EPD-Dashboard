@@ -57,12 +57,33 @@ class Pusher:
         self._busy = asyncio.Lock()
         self._debounce_task: asyncio.Task | None = None
         self._in_progress = False
-
-    # ---------- 状态 ----------
+        self._push_count = 0
 
     @property
     def in_progress(self) -> bool:
         return self._in_progress
+
+    # ---------- 状态 ----------
+
+    def _commit_flags(self, caps: protocol.CapsInfo) -> int:
+        """决定本次 COMMIT 是否局部刷新：设备支持且未到全刷周期时使用局部。
+
+        局部刷新不闪屏、耗时短，但残影会累积；设备每日午夜会自动全刷清残影，
+        这里再按 full_refresh_every 周期性强制全刷双保险。
+        """
+        every = self._cfg.full_refresh_every
+        flags = protocol.COMMIT_DEFAULT
+        if not self._cfg.commit_sleep:
+            flags &= ~protocol.COMMIT_SLEEP_AFTER
+        if not (caps.features & protocol.FEATURE_PARTIAL_REFRESH):
+            return flags
+        self._push_count += 1
+        if every <= 0:
+            return flags
+        if self._push_count % every == 0:
+            log.info("达到全刷周期（第 %s 次），本次全刷清残影", self._push_count)
+            return flags
+        return flags | protocol.COMMIT_PARTIAL
 
     def read_status(self) -> dict:
         """合并文件中的最近一次结果与内存中的进行中标记。"""
@@ -174,10 +195,11 @@ class Pusher:
                     return None
                 time.sleep(1.0)
 
-    def _settle(self) -> None:
-        """43 OK 在物理刷新前发出，留出三色屏全刷时间再释放锁。"""
-        if self._cfg.settle_seconds > 0:
-            time.sleep(self._cfg.settle_seconds)
+    def _settle(self, seconds: float | None = None) -> None:
+        """COMMIT OK 在物理刷新前发出，留出屏幕刷新时间再释放锁。"""
+        seconds = self._cfg.settle_seconds if seconds is None else seconds
+        if seconds > 0:
+            time.sleep(seconds)
 
     def _build_entries(self, rows: list[dict]) -> tuple[list[FoodRecord], list[bytes]]:
         zone = ZoneInfo(self._cfg.timezone)
@@ -214,9 +236,17 @@ class Pusher:
                 caps = await session.handshake()
                 if caps.max_foods < len(foods):
                     log.warning("设备食品上限 %s 少于待发送 %s 条", caps.max_foods, len(foods))
+                flags = self._commit_flags(caps)
+                partial = bool(flags & protocol.COMMIT_PARTIAL)
                 await session.push_foods(
-                    foods[: caps.max_foods], bitmaps[: caps.max_foods], now_utc, tz_minutes
+                    foods[: caps.max_foods],
+                    bitmaps[: caps.max_foods],
+                    now_utc,
+                    tz_minutes,
+                    commit_flags=flags,
                 )
+                # 局部刷新仅刷新 ~1-2s，无需等全刷的 16s
+                self._settle(3.0 if partial else None)
                 return session.device_name or "unknown"
 
         return asyncio.run(run())
