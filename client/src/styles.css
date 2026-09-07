@@ -1,0 +1,161 @@
+:root {
+  --titlebar-height: 42px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px 28px;
+}
+
+/* ===== 墨水屏预览面板（模拟 800x480 屏右侧食品区观感） ===== */
+.epd-preview {
+  background: #f2f1ec;
+  color: #1a1a1a;
+  border: 1px solid #d8d6cd;
+  border-radius: 8px;
+  padding: 14px 16px;
+  font-family: "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.06);
+}
+
+.epd-preview h4 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #6b6b66;
+  letter-spacing: 2px;
+}
+
+.epd-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 2px;
+  border-top: 1px dashed #cfcdc2;
+  font-size: 16px;
+}
+
+.epd-row .epd-name {
+  font-weight: 600;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.epd-row .epd-type {
+  font-size: 12px;
+  color: #55554f;
+  border: 1px solid #b9b7ac;
+  border-radius: 4px;
+  padding: 0 6px;
+  line-height: 18px;
+}
+
+.epd-empty {
+  padding: 18px 2px;
+  color: #8a897f;
+  font-size: 14px;
+}
+
+/* ===== 标题栏 ===== */
+.titlebar {
+  height: var(--titlebar-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  user-select: none;
+  background: var(--el-bg-color);
+  border-bottom: 1px solid var(--el-border-color-light);
+  padding-left: 12px;
+}
+
+.titlebar .tb-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.win-controls {
+  display: flex;
+  height: 100%;
+}
+
+.win-btn {
+  width: 44px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--el-text-color-regular);
+  transition: background 0.15s;
+}
+
+.win-btn:hover {
+  background: var(--el-fill-color);
+}
+
+.win-btn.close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+/* ===== 导航 ===== */
+.app-nav {
+  border-bottom: 1px solid var(--el-border-color-light);
+  padding: 0 12px;
+}
+
+.app-nav .el-menu-item {
+  height: 42px;
+  line-height: 42px;
+}
+
+/* ===== 通用 ===== */
+.stat-card .stat-value {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.stat-card .stat-label {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.toolbar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.muted {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
