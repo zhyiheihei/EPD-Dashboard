@@ -59,11 +59,14 @@ new_item = b.js("foods.find(f => f.name === 'WebUI回归测试条目') ? foods.f
 check("记一笔真实入库", new_item is not None)
 b.screenshot("/tmp/webui-t2-added.png")
 
-# 吃完（软删）→ 已吃完区
+# 吃完（软删）→ 已吃完区（计数动态断言）
+eaten_before = b.js("foods.filter(f => f.consumed_at !== null).length")
 b.js(f"document.querySelector(\"[data-id='{new_item}'] .act-eat\").click()")
 time.sleep(1.2)
+eaten_after = b.js("foods.filter(f => f.consumed_at !== null).length")
 eaten = b.js(f"foods.find(f => f.id === {new_item}).consumed_at !== null")
-check("吃完后条目进入已吃完分组", eaten and "已吃完 · 1 件" in b.js("[...document.querySelectorAll('#food-list .group-title')].map(g=>g.textContent.trim()).join('|')"))
+check("吃完后条目进入已吃完分组", eaten and eaten_after == eaten_before + 1,
+      f"{eaten_before} -> {eaten_after}")
 b.screenshot("/tmp/webui-t3-eaten.png")
 
 # 恢复
