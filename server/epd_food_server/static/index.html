@@ -1,0 +1,1062 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>食管家 · 原型</title>
+<style>
+
+  :root {
+    --bg: #ededed;
+    --nav: #f7f7f7;
+    --cell: #ffffff;
+    --text: #191919;
+    --text-2: #888888;
+    --sep: rgba(0,0,0,.06);
+    --accent: #07c160;        /* 微信绿 */
+    --accent-pressed: #06ad56;
+    --red: #fa5151;
+    --orange: #ff9900;
+    --blue: #576b95;          /* 微信链接蓝 */
+    --swipe-eat: #07c160;
+    --swipe-more: #c8c8cd;
+    --badge-bg: #fa5151;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111111;
+      --nav: #191919;
+      --cell: #191919;
+      --text: #e8e8e8;
+      --text-2: #7d7d7d;
+      --sep: rgba(255,255,255,.07);
+      --accent: #07c160;
+      --red: #fa5151;
+      --orange: #ff9900;
+      --blue: #7d90b8;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
+    max-width: 520px; margin: 0 auto; display: flex; flex-direction: column;
+    -webkit-font-smoothing: antialiased; overflow: hidden;
+  }
+
+  /* ---- 顶部导航（微信式） ---- */
+  .navbar {
+    background: var(--nav); padding: env(safe-area-inset-top) 16px 0;
+    border-bottom: 1px solid var(--sep); flex: none;
+  }
+  .navbar .bar { display: flex; align-items: center; height: 52px; }
+  .navbar h1 { font-size: 17px; font-weight: 600; flex: 1; }
+  .navbar .navbtn { color: var(--text-2); font-size: 13px; padding: 6px 2px 6px 12px; cursor: pointer; }
+  .navbar .sub { color: var(--text-2); font-size: 12px; padding: 0 4px 10px; }
+
+  /* ---- 列表（微信 cell 式） ---- */
+  .list { flex: 1; overflow-y: auto; padding-bottom: 20px; }
+  .group-title {
+    color: var(--text-2); font-size: 12.5px; padding: 14px 16px 7px;
+  }
+  .cell { position: relative; background: var(--cell); overflow: hidden; }
+  .cell .actions {
+    position: absolute; top: 0; bottom: 0; right: 0; width: 157px; display: flex;
+  }
+  .cell.settling .row, .cell.settling .actions button { transition: transform .18s ease-out; }
+  .cell .actions button {
+    border: none; width: 78px; color: #fff; font-size: 14px; cursor: pointer;
+    background: var(--accent);
+  }
+  .cell .actions button.more { background: var(--swipe-more); color: #fff; margin-left: 1px; }
+  .cell .row {
+    position: relative; display: flex; align-items: center; gap: 12px;
+    padding: 11px 16px; background: var(--cell); touch-action: pan-y;
+    transition: transform .12s ease-out;
+  }
+  .cell.open .row { transition: transform .18s ease-out; }
+  .avatar {
+    width: 46px; height: 46px; border-radius: 8px; flex: none;
+    display: flex; align-items: center; justify-content: center; font-size: 22px;
+    background: var(--bg);
+  }
+  .cell .info { flex: 1; min-width: 0; }
+  .cell .top { display: flex; align-items: baseline; gap: 6px; }
+  .cell .name { font-size: 16px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cell .qty { color: var(--text-2); font-size: 13px; flex: none; }
+  .cell .sub { color: var(--text-2); font-size: 13px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cell .right { flex: none; text-align: right; }
+  .cell .expiry { color: var(--text-2); font-size: 12px; }
+  .pill {
+    display: inline-block; margin-top: 4px; font-size: 11.5px; padding: 1px 8px;
+    border-radius: 5px; color: #fff; background: var(--red);
+  }
+  .pill.orange { background: var(--orange); }
+  .pill.green { background: var(--accent); }
+  .pill.gray-soft { background: var(--swipe-more); }
+  .fold { float: right; color: var(--blue); font-size: 12px; }
+  .empty-eaten { color: var(--text-2); font-size: 13px; background: var(--cell); padding: 14px 16px; }
+  .fab {
+    position: fixed; bottom: 76px; left: 50%; transform: translateX(-50%); left: 50%;
+    background: var(--accent); color: #fff; border: none;
+    padding: 12px 24px; border-radius: 999px; font-size: 15px; font-weight: 600;
+    box-shadow: 0 6px 20px rgba(7,193,96,.35); cursor: pointer; z-index: 10;
+  }
+  .cell .sep { position: absolute; left: 74px; right: 0; bottom: 0; height: 1px; background: var(--sep); }
+
+  .hint { color: var(--text-2); font-size: 12px; text-align: center; padding: 18px 0 6px; }
+
+  /* ---- 底部 tab（微信式） ---- */
+  .tabbar {
+    flex: none; background: var(--nav); border-top: 1px solid var(--sep);
+    display: flex; padding: 6px 0 env(safe-area-inset-bottom);
+  }
+  .tab { flex: 1; text-align: center; color: var(--text-2); font-size: 11px; padding: 3px 0; cursor: pointer; }
+  .tab .ic { font-size: 22px; display: block; }
+  .tab.on { color: var(--accent); }
+
+
+  :root {
+    --bg: #ededed; --nav: #f7f7f7; --cell: #ffffff;
+    --text: #191919; --text-2: #888888; --sep: rgba(0,0,0,.06);
+    --accent: #07c160; --red: #fa5151; --orange: #ff9900; --blue: #576b95;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111111; --nav: #191919; --cell: #191919;
+      --text: #e8e8e8; --text-2: #7d7d7d; --sep: rgba(255,255,255,.07);
+      --blue: #7d90b8;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
+    max-width: 520px; margin: 0 auto; display: flex; flex-direction: column;
+    -webkit-font-smoothing: antialiased; overflow: hidden;
+  }
+  .navbar {
+    background: var(--nav); padding: env(safe-area-inset-top) 16px 0;
+    border-bottom: 1px solid var(--sep); flex: none;
+  }
+  .navbar .bar { display: flex; align-items: center; height: 52px; }
+  .navbar h1 { font-size: 17px; font-weight: 600; flex: 1; }
+
+  .page { flex: 1; overflow-y: auto; padding-bottom: 20px; }
+  .group-title { color: var(--text-2); font-size: 12.5px; padding: 14px 16px 7px; }
+  .cell { background: var(--cell); position: relative; }
+  .cell .row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+  .cell .info { flex: 1; min-width: 0; }
+  .cell .name { font-size: 16px; font-weight: 500; }
+  .cell .sub { color: var(--text-2); font-size: 13px; margin-top: 3px; }
+  .cell .val { color: var(--text-2); font-size: 13px; }
+  .sep { height: 1px; background: var(--sep); margin-left: 16px; }
+
+  .preview-wrap { background: var(--cell); padding: 14px 16px 16px; }
+  .preview {
+    width: 100%; border-radius: 10px; border: 1px solid var(--sep);
+    background: #fff; display: block;
+  }
+  .preview-note { color: var(--text-2); font-size: 12px; margin-top: 8px; display: flex; justify-content: space-between; }
+  .pill {
+    display: inline-block; font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 5px; min-width: 34px; text-align: center;
+    color: #fff; background: var(--accent); margin-left: 8px; vertical-align: 1px;
+  }
+  .pill.busy { background: var(--orange); }
+
+  .actions-bar { display: flex; gap: 10px; padding: 14px 16px 4px; }
+  .big-btn {
+    flex: 1; border: none; border-radius: 12px; padding: 13px 0;
+    font-size: 15px; font-weight: 600; cursor: pointer;
+    background: var(--accent); color: #fff;
+  }
+  .big-btn.secondary { background: var(--cell); color: var(--blue); border: 1px solid var(--sep); }
+  .log {
+    background: var(--cell); margin: 14px 16px 0; border-radius: 12px; padding: 12px 14px;
+    font-size: 12px; color: var(--text-2); line-height: 1.9;
+  }
+  .log b { color: var(--text); font-weight: 500; }
+  .ok { color: var(--accent); }
+  .tabbar {
+    flex: none; background: var(--nav); border-top: 1px solid var(--sep);
+    display: flex; padding: 6px 0 env(safe-area-inset-bottom);
+  }
+  .tab { flex: 1; text-align: center; color: var(--text-2); font-size: 11px; padding: 3px 0; cursor: pointer; }
+  .tab .ic { font-size: 22px; display: block; }
+  .tab.on { color: var(--accent); }
+
+
+  :root {
+    --bg: #ededed; --nav: #f7f7f7; --cell: #ffffff;
+    --text: #191919; --text-2: #888888; --sep: rgba(0,0,0,.06);
+    --accent: #07c160; --red: #fa5151; --orange: #ff9900; --blue: #576b95;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111111; --nav: #191919; --cell: #191919;
+      --text: #e8e8e8; --text-2: #7d7d7d; --sep: rgba(255,255,255,.07);
+      --blue: #7d90b8;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
+    max-width: 520px; margin: 0 auto; display: flex; flex-direction: column;
+    -webkit-font-smoothing: antialiased; overflow: hidden;
+  }
+  .navbar { background: var(--nav); padding: env(safe-area-inset-top) 16px 0; border-bottom: 1px solid var(--sep); flex: none; }
+  .navbar .bar { display: flex; align-items: center; height: 52px; }
+  .navbar h1 { font-size: 17px; font-weight: 600; flex: 1; }
+  .navbar .navbtn { color: var(--blue); font-size: 14px; cursor: pointer; }
+
+  .page { flex: 1; overflow-y: auto; padding-bottom: 20px; }
+  .group-title { color: var(--text-2); font-size: 12.5px; padding: 14px 16px 7px; }
+  .cell { background: var(--cell); position: relative; }
+  .cell .row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+  .cell .info { flex: 1; min-width: 0; }
+  .cell .name { font-size: 16px; font-weight: 500; }
+  .cell .sub { color: var(--text-2); font-size: 13px; margin-top: 3px; }
+  .cell .val { color: var(--text-2); font-size: 13px; }
+  .sep { height: 1px; background: var(--sep); margin-left: 16px; }
+  .avatar {
+    width: 46px; height: 46px; border-radius: 8px; flex: none;
+    display: flex; align-items: center; justify-content: center; font-size: 20px;
+    background: var(--bg); color: var(--blue); font-weight: 700; font-size: 15px;
+  }
+  .pill {
+    display: inline-block; font-size: 11.5px; font-weight: 600; padding: 2px 9px;
+    border-radius: 5px; color: #fff; background: var(--accent);
+    min-width: 34px; text-align: center; margin-left: 8px; vertical-align: 1px;
+  }
+  .pill.gray { background: var(--text-2); }
+  .pill.orange { background: var(--orange); }
+  .pill.blue { background: var(--blue); }
+
+  .progress-card { background: var(--cell); padding: 14px 16px; }
+  .progress-head { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }
+  .progress-head b { font-weight: 500; }
+  .bar { height: 8px; border-radius: 4px; background: var(--sep); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 68%; background: var(--accent); border-radius: 4px; }
+  .progress-sub { color: var(--text-2); font-size: 12px; margin-top: 7px; }
+
+  .upload {
+    margin: 14px 16px 0; border: 1.5px dashed var(--text-2); border-radius: 12px;
+    padding: 18px; text-align: center; color: var(--text-2); font-size: 14px; background: transparent;
+  }
+  .warn {
+    margin: 14px 16px 0; background: var(--cell); border-radius: 12px; padding: 12px 14px;
+    font-size: 12.5px; color: var(--orange); line-height: 1.7;
+  }
+  .tabbar {
+    flex: none; background: var(--nav); border-top: 1px solid var(--sep);
+    display: flex; padding: 6px 0 env(safe-area-inset-bottom);
+  }
+  .tab { flex: 1; text-align: center; color: var(--text-2); font-size: 11px; padding: 3px 0; cursor: pointer; }
+  .tab .ic { font-size: 22px; display: block; }
+  .tab.on { color: var(--accent); }
+
+
+  :root {
+    --bg: #ededed; --nav: #f7f7f7; --cell: #ffffff;
+    --text: #191919; --text-2: #888888; --sep: rgba(0,0,0,.06);
+    --accent: #07c160; --red: #fa5151; --orange: #ff9900; --blue: #576b95;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111111; --nav: #191919; --cell: #191919;
+      --text: #e8e8e8; --text-2: #7d7d7d; --sep: rgba(255,255,255,.07);
+      --blue: #7d90b8;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
+    max-width: 520px; margin: 0 auto; display: flex; flex-direction: column;
+    -webkit-font-smoothing: antialiased; overflow: hidden;
+  }
+  .navbar { background: var(--nav); padding: env(safe-area-inset-top) 16px 0; border-bottom: 1px solid var(--sep); flex: none; }
+  .navbar .bar { display: flex; align-items: center; height: 52px; }
+  .navbar h1 { font-size: 17px; font-weight: 600; }
+
+  .page { flex: 1; overflow-y: auto; padding-bottom: 20px; }
+  .group-title { color: var(--text-2); font-size: 12.5px; padding: 14px 16px 7px; }
+  .cell { background: var(--cell); position: relative; }
+  .cell .row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; }
+  .cell .info { flex: 1; min-width: 0; }
+  .cell .name { font-size: 15.5px; }
+  .cell .sub { color: var(--text-2); font-size: 12.5px; margin-top: 3px; line-height: 1.5; }
+  .cell .val { color: var(--text-2); font-size: 13.5px; }
+  .sep { height: 1px; background: var(--sep); margin-left: 16px; }
+  .toggle {
+    width: 50px; height: 30px; border-radius: 15px; background: var(--accent);
+    position: relative; flex: none; cursor: pointer;
+  }
+  .toggle::after {
+    content: ""; position: absolute; top: 2px; right: 2px; width: 26px; height: 26px;
+    border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25);
+  }
+  .toggle.off { background: var(--sep); }
+  .toggle.off::after { right: auto; left: 2px; }
+  .stepper {
+    display: flex; align-items: center; gap: 0; border: 1px solid var(--sep);
+    border-radius: 8px; overflow: hidden; flex: none;
+  }
+  .stepper button {
+    border: none; background: var(--bg); width: 34px; height: 32px; font-size: 17px;
+    color: var(--text); cursor: pointer;
+  }
+  .stepper span { width: 42px; text-align: center; font-size: 15px; font-weight: 500; }
+  .input {
+    width: 180px; border: 1px solid var(--sep); background: var(--bg); border-radius: 8px;
+    padding: 8px 10px; font-size: 13px; color: var(--text); text-align: right;
+  }
+  .danger-zone { margin: 16px; }
+  .danger-btn {
+    width: 100%; border: none; border-radius: 12px; padding: 13px 0; font-size: 15px;
+    font-weight: 500; background: var(--cell); color: var(--red); cursor: pointer;
+  }
+  .foot { color: var(--text-2); font-size: 12px; text-align: center; padding: 18px 0 6px; line-height: 1.8; }
+  .tabbar {
+    flex: none; background: var(--nav); border-top: 1px solid var(--sep);
+    display: flex; padding: 6px 0 env(safe-area-inset-bottom);
+  }
+  .tab { flex: 1; text-align: center; color: var(--text-2); font-size: 11px; padding: 3px 0; cursor: pointer; }
+  .tab .ic { font-size: 22px; display: block; }
+  .tab.on { color: var(--accent); }
+
+  html, body { overflow: hidden; }
+  .page { flex: 1; display: none; flex-direction: column; overflow: hidden; }
+  .page.active { display: flex; }
+  .page[data-page="epd"], .page[data-page="fw"], .page[data-page="set"] { display: none; overflow-y: auto; }
+  .page.active[data-page="epd"], .page.active[data-page="fw"], .page.active[data-page="set"] { display: block; }
+</style>
+</head>
+<body>
+  <div class="navbar"><div class="bar"><h1 id="nav-title">食管家</h1></div></div>
+
+  <div class="page" data-page="home">
+    <div class="list" id="food-list"></div>
+    <button class="fab" id="fab">＋ 记一笔</button>
+
+  <div id="add-sheet" style="position:fixed;inset:0;display:none;z-index:60">
+    <div class="mask" style="position:absolute;inset:0;background:rgba(0,0,0,.45);opacity:0;transition:opacity .18s"></div>
+    <div class="panel" style="position:absolute;left:0;right:0;bottom:0;padding:10px 14px calc(14px + env(safe-area-inset-bottom));transform:translateY(110%);transition:transform .22s ease-out;max-width:520px;margin:0 auto">
+      <div class="add-card">
+        <div class="add-title">记一笔</div>
+        <div class="add-row">
+          <label>名称</label>
+          <input id="add-name" placeholder="如：鲜牛奶" maxlength="32">
+        </div>
+        <div class="add-row">
+          <label>品类</label>
+          <div class="pill-seg" id="seg-cat">
+            <span class="on" data-cat="食品">食品</span>
+            <span data-cat="饮品">饮品</span>
+          </div>
+        </div>
+        <div class="add-row">
+          <label>数量</label>
+          <div class="stepper">
+            <button type="button" id="qty-minus">−</button>
+            <input id="add-qty" type="number" value="1" min="1">
+            <button type="button" id="qty-plus">＋</button>
+          </div>
+        </div>
+        <div class="add-row" id="row-prod">
+          <label>生产日期</label>
+          <span class="date-val" id="prod-display">今天</span>
+          <input id="add-prod" type="date" style="position:absolute;opacity:0;width:0;height:0">
+        </div>
+        <div class="add-row">
+          <label>保质期</label>
+          <input id="add-life" type="number" value="6" min="1" class="life-input">
+          <div class="pill-seg" id="seg-unit">
+            <span class="on" data-unit="30">月</span>
+            <span data-unit="1">日</span>
+            <span data-unit="365">年</span>
+          </div>
+        </div>
+        <button id="add-save">保存</button>
+      </div>
+            <div style="background:var(--cell);border-radius:14px;text-align:center;padding:13px;font-size:16px;font-weight:600;margin-top:8px;cursor:pointer" id="add-cancel">取消</div>
+    </div>
+  </div>
+  <style>
+    .add-card { background:var(--cell); border-radius:14px; padding:4px 16px 16px; }
+    .add-title { font-size:16px; font-weight:600; text-align:center; padding:14px 0 4px; }
+    .add-row { display:flex; align-items:center; gap:10px; padding:13px 0; border-bottom:1px solid var(--sep); font-size:15px; position:relative; }
+    .add-row:last-of-type { border-bottom:none; }
+    .add-row label { width:70px; color:var(--text); flex:none; font-size:15.5px; }
+    .add-row input { flex:1; border:none; background:transparent; color:var(--text); font-size:16px; outline:none; text-align:right; min-width:0; }
+    .add-row input::placeholder { color:var(--text-2); }
+    .pill-seg { margin-left:auto; display:flex; background:var(--bg); border-radius:9px; padding:3px; gap:2px; }
+    .pill-seg span { padding:5px 14px; border-radius:7px; font-size:13.5px; color:var(--text-2); cursor:pointer; transition:all .15s; }
+    .pill-seg span.on { background:var(--accent); color:#fff; font-weight:500; }
+    .stepper { margin-left:auto; display:flex; align-items:stretch; border:1px solid var(--sep); border-radius:9px; overflow:hidden; }
+    .stepper button { border:none; background:var(--bg); width:36px; height:32px; font-size:17px; color:var(--text); cursor:pointer; }
+    .stepper input, .stepper span.num {
+      width:44px; text-align:center; font-size:15.5px; border-left:1px solid var(--sep);
+      border-right:1px solid var(--sep); height:32px; flex:none; line-height:32px;
+      border-top:none; border-bottom:none; background:var(--cell); color:var(--text); font-weight:500;
+    }
+    .date-val { margin-left:auto; color:var(--text-2); font-size:15px; }
+    #row-prod::after { content:"›"; color:var(--text-2); margin-left:6px; font-size:18px; }
+    .life-input { width:60px !important; flex:none !important; text-align:center !important; background:var(--bg); border-radius:8px; padding:5px 0; margin-right:10px; }
+    /* 隐藏 number input 原生 spinner（与 -+ 按钮重复） */
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+    #add-save { width:100%; border:none; border-radius:12px; background:var(--accent); color:#fff; font-size:16px; font-weight:600; padding:13px; margin-top:16px; cursor:pointer; }
+  </style>
+</style>
+  </div>
+
+  <div class="page" data-page="epd">
+    <div class="group-title">屏幕内容预览 · 实时</div>
+    <div class="preview-wrap">
+      <img class="preview" id="epd-preview" alt="墨水屏预览">
+      <div class="preview-note">
+        <span id="epd-res">800×480 · 7.5 寸三色</span>
+        <span>上次同步 <b style="color:var(--text)" id="epd-last">—</b></span>
+      </div>
+    </div>
+
+    <div class="actions-bar">
+      <button class="big-btn" id="btn-push">立即刷新墨水屏</button>
+    </div>
+
+    <div class="group-title">最近推送</div>
+    <div class="cell">
+      <div class="row">
+        <div class="info">
+          <div class="name" id="push-reason">—</div>
+          <div class="sub" id="push-detail">加载中…</div>
+        </div>
+        <span class="val" id="push-result"></span>
+      </div>
+      <div class="sep"></div>
+    </div>
+
+    <div class="group-title">设备</div>
+    <div class="cell">
+      <div class="row">
+        <div class="info">
+          <div class="name" id="dev-name">—</div>
+          <div class="sub" id="dev-info">读取中…</div>
+        </div>
+        <span class="val" id="dev-online">—</span>
+      </div>
+      <div class="sep"></div>
+    </div>
+  </div>
+
+  <div class="page" data-page="fw">
+    <div class="group-title">当前设备</div>
+    <div class="cell">
+      <div class="row">
+        <div class="avatar" id="fw-cur-badge">—</div>
+        <div class="info">
+          <div class="name" id="fw-cur-name">读取中…</div>
+          <div class="sub">nRF52811 · S112 7.3.0 · UC8179 7.5" 三色</div>
+        </div>
+        <span class="pill" id="fw-cur-tag" style="display:none">最新</span>
+      </div>
+      <div class="sep"></div>
+    </div>
+
+    <div class="group-title">升级进行中 <span id="fw-prog-wrap" style="display:none"></span></div>
+    <div class="progress-card" id="fw-progress" style="display:none">
+      <div class="progress-head"><b id="fw-prog-title">OTA</b><span id="fw-prog-pct">0%</span></div>
+      <div class="bar"><i id="fw-prog-bar" style="width:0%"></i></div>
+      <div class="progress-sub" id="fw-prog-sub">准备中…</div>
+    </div>
+
+    <div class="group-title">固件包</div>
+    <div id="fw-list"></div>
+
+    <div class="upload" id="fw-upload">📦 拖入或点击选择 .zip OTA 包<br><span style="font-size:12px">nrfutil 生成的 Secure DFU 包，自动解析版本号</span></div>
+    <input type="file" id="fw-file" accept=".zip" style="display:none">
+    <div class="warn">⚠️ 升级过程约 90 秒，期间墨水屏会断开广播进入 bootloader（DfuTarg），完成后自动重启并恢复。升级失败时设备会停留在 bootloader，直接重试即可。</div>
+  </div>
+
+  <div class="page" data-page="set">
+
+    <div class="group-title">服务连接</div>
+    <div class="cell">
+      <div class="row"><div class="info"><div class="name">服务地址</div></div><span class="val">192.168.1.20:18313</span></div>
+      <div class="sep"></div>
+    </div>
+    <div class="cell">
+      <div class="row"><div class="info"><div class="name">访问令牌</div><div class="sub">用于 WebUI 与 API 鉴权，留空则本机免鉴权</div></div><span class="val">••••••••</span></div>
+      <div class="sep"></div>
+    </div>
+
+    <div class="group-title">推送策略</div>
+    <div class="cell">
+      <div class="row">
+        <div class="info"><div class="name">每天 0 点定时全刷</div><div class="sub">全刷负责日期/倒计时更新与残影清理（每天仅此 1 次全屏刷新）</div></div>
+        <div class="toggle"></div>
+      </div>
+      <div class="sep"></div>
+    </div>
+    <div class="cell">
+      <div class="row">
+        <div class="info"><div class="name">变更即时上屏</div><div class="sub">录入/吃完后立即局部刷新食品栏；关闭则次日 0 点生效</div></div>
+        <div class="toggle"></div>
+      </div>
+      <div class="sep"></div>
+    </div>
+    <div class="cell">
+      <div class="row">
+        <div class="info"><div class="name">周期性强制全刷</div><div class="sub">每 N 次推送额外全刷一次清残影，0 = 关闭（已有每日全刷兜底）</div></div>
+        <div class="stepper"><button>−</button><span class="num">8</span><button>＋</button></div>
+      </div>
+      <div class="sep"></div>
+    </div>
+    <div class="cell">
+      <div class="row">
+        <div class="info"><div class="name">显示时区</div></div>
+        <span class="val">Asia/Shanghai (UTC+8)</span>
+      </div>
+      <div class="sep"></div>
+    </div>
+
+    <div class="group-title">临期提醒阈值</div>
+    <div class="cell">
+      <div class="row">
+        <div class="info"><div class="name">红色警示</div><div class="sub">剩余 ≤ 此天数标红（默认 2 天）</div></div>
+        <div class="stepper"><button>−</button><span class="num">2</span><button>＋</button></div>
+      </div>
+      <div class="sep"></div>
+    </div>
+    <div class="cell">
+      <div class="row">
+        <div class="info"><div class="name">橙色预警</div><div class="sub">剩余 ≤ 此天数标橙（默认 7 天）</div></div>
+        <div class="stepper"><button>−</button><span class="num">7</span><button>＋</button></div>
+      </div>
+      <div class="sep"></div>
+    </div>
+
+    <div class="group-title">维护</div>
+    <div class="danger-zone">
+      <button class="danger-btn">清空全部数据（重新导入）</button>
+    </div>
+    <p class="foot">食管家 WebUI v0.1 · 服务端 epd-food-server<br>墨水屏 NRF_EPD_3E1C · 固件 v0x24</p>
+  </div>
+  </div>
+
+  <div class="tabbar">
+    <div class="tab on" data-tab="home"><span class="ic">🏠</span>库存</div>
+    <div class="tab" data-tab="epd"><span class="ic">📺</span>墨水屏</div>
+    <div class="tab" data-tab="fw"><span class="ic">⬆️</span>固件</div>
+    <div class="tab" data-tab="set"><span class="ic">⚙️</span>设置</div>
+  </div>
+
+
+<script>
+  // ---- 首页数据驱动（真实 API）----
+  const ICONS = { '食品': '🥫', '饮品': '🧃', '零食': '🍪', '调味品': '🧂', '生鲜': '🥩' };
+  const foods = [];  // API 拉取后填充
+  let metaInfo = { categories: [] };
+  const dayInfo = f => f.days_remaining < 0 ? { cls: 'expired', label: `已过 ${-f.days_remaining} 天`, group: 0 }
+    : f.days_remaining <= 7 ? { cls: 'orange', label: `剩 ${f.days_remaining} 天`, group: 1 }
+    : { cls: 'green', label: `剩 ${f.days_remaining} 天`, group: 2 };
+  const GROUPS = [
+    { title: f => `已过期 · ${f.length} 件` },
+    { title: f => `临期 · 7 天内 · ${f.length} 件` },
+    { title: f => `在库 · 新鲜` },
+    { title: f => `已吃完 · ${f.length} 件`, eaten: true },
+  ];
+  const verb = f => f.category === '饮品' ? '喝完了' : '吃完了';
+
+  async function apiFetch(path, opts = {}) {
+    const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+    const token = localStorage.getItem('token');
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const resp = await fetch('/api' + path, { ...opts, headers });
+    if (resp.status === 401) { promptToken(); throw new Error('unauthorized'); }
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || resp.statusText);
+    return resp.json();
+  }
+
+  async function loadFoods() {
+    const [list, meta] = await Promise.all([
+      apiFetch('/foods?status_filter=all'),
+      apiFetch('/meta').catch(() => ({ categories: [] })),
+    ]);
+    metaInfo = meta;
+    foods.splice(0, foods.length, ...list);
+    renderList();
+  }
+
+  const sortByUrgency = list => list.sort((a, b) => a.days_remaining - b.days_remaining);
+
+  function renderList() {
+    const list = document.getElementById('food-list');
+    const active = foods.filter(f => !f.consumed_at);
+    const eaten = foods.filter(f => f.consumed_at);
+    let html = '';
+    [0, 1, 2].forEach(g => {
+      const items = sortByUrgency(active.filter(f => dayInfo(f).group === g));
+      if (!items.length && g !== 2) return;
+      html += `<div class="group-title">${GROUPS[g].title(items)}</div>`;
+      items.forEach(f => { html += foodCell(f, false); });
+    });
+    html += `<div class="group-title eaten-head" id="eaten-head">${GROUPS[3].title(eaten)}<span class="fold">收起</span></div>`;
+    html += `<div id="eaten-body">`;
+    eaten.forEach(f => { html += foodCell(f, true); });
+    if (!eaten.length) html += `<div class="empty-eaten">还没有吃完的记录</div>`;
+    html += `</div>`;
+    list.innerHTML = html;
+    bindCells();
+  }
+
+  function foodCell(f, isEaten) {
+    const info = dayInfo(f);
+    const badge = isEaten
+      ? `<span class="pill gray-soft">已吃完</span>`
+      : `<span class="pill ${info.cls}">${info.label}</span>`;
+    return `
+    <div class="cell" data-id="${f.id}">
+      <div class="actions"><button class="act-eat">${isEaten ? '恢复' : verb(f)}</button><button class="more">详情</button></div>
+      <div class="row">
+        <div class="avatar">${ICONS[f.category] || '🥫'}</div>
+        <div class="info">
+          <div class="top"><span class="name">${esc(f.name)}</span><span class="qty">×${f.quantity}</span></div>
+          <div class="sub">${esc(f.category)} · 到期 ${f.expiry_date}</div>
+        </div>
+        <div class="sep"></div>
+        <div class="right"><span class="expiry">${f.expiry_date}</span><br>${badge}</div>
+      </div>
+    </div>`;
+  }
+
+  function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  // ---- FLIP 动画：数据变更前记录位置，重渲染后从旧位置滑到新位置 ----
+  function withFlip(mutate) {
+    const old = new Map();
+    document.querySelectorAll('#food-list .cell').forEach(c =>
+      old.set(c.dataset.id, c.getBoundingClientRect().top));
+    mutate();
+    renderList();
+    document.querySelectorAll('#food-list .cell').forEach(c => {
+      const prev = old.get(c.dataset.id);
+      if (prev === undefined) {
+        c.style.opacity = 0; c.style.transition = 'opacity .3s';
+        requestAnimationFrame(() => { c.style.opacity = 1; });
+        return;
+      }
+      const delta = prev - c.getBoundingClientRect().top;
+      if (Math.abs(delta) < 4) return;
+      c.style.transition = 'none';
+      c.style.transform = `translateY(${delta}px)`;
+      requestAnimationFrame(() => {
+        c.style.transition = 'transform .35s cubic-bezier(.22,.9,.36,1)';
+        c.style.transform = 'none';
+      });
+    });
+  }
+
+  async function consumeFood(id) {
+    await apiFetch(`/foods/${id}`, { method: 'DELETE' });
+    await loadFoods();
+  }
+  async function restoreFood(id) {
+    await apiFetch(`/foods/${id}/restore`, { method: 'POST' });
+    await loadFoods();
+  }
+  async function removeFood(id) {
+    await apiFetch(`/foods/${id}?hard=true`, { method: 'DELETE' });
+    await loadFoods();
+  }
+  async function editFood(id) {
+    const f = foods.find(x => x.id === id);
+    const v = prompt(`修改「${f.name}」数量`, f.quantity);
+    if (v === null) return;
+    await apiFetch(`/foods/${id}`, { method: 'PATCH', body: JSON.stringify({ quantity: Math.max(1, parseInt(v) || 1) }) });
+    await loadFoods();
+  }
+
+  // 已吃完分组折叠
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#eaten-head')) return;
+    const body = document.getElementById('eaten-body');
+    const fold = document.getElementById('eaten-head').querySelector('.fold');
+    const hidden = body.style.display === 'none';
+    body.style.display = hidden ? '' : 'none';
+    fold.textContent = hidden ? '收起' : '展开';
+  });
+
+  function alertErr(err) {
+    console.error(err);
+    alert('操作失败：' + (err.message || err));
+  }
+  function promptToken() {
+    if (document.getElementById('token-bar')) return;
+    const bar = document.createElement('div');
+    bar.id = 'token-bar';
+    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:100;background:var(--cell);padding:10px 14px;display:flex;gap:8px;box-shadow:var(--shadow)';
+    bar.innerHTML = `
+      <input id="token-input" placeholder="请输入访问令牌" style="flex:1;border:1px solid var(--sep);background:var(--bg);border-radius:9px;padding:9px 12px;font-size:14px;color:var(--text);outline:none">
+      <button id="token-save" style="border:none;border-radius:9px;background:var(--accent);color:#fff;font-size:14px;font-weight:600;padding:0 16px;cursor:pointer">登录</button>`;
+    document.body.appendChild(bar);
+    document.getElementById('token-save').addEventListener('click', submitToken);
+    document.getElementById('token-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitToken(); });
+  }
+  function submitToken() {
+    const t = document.getElementById('token-input').value.trim();
+    if (t) { localStorage.setItem('token', t); location.reload(); }
+  }
+
+  loadFoods().catch(err => {
+    if (err.message !== 'unauthorized') console.error(err);
+    document.getElementById('food-list').innerHTML =
+      `<div class="empty-eaten">加载失败：${esc(err.message)}（检查右上角设置中的访问令牌）</div>`;
+  });
+</script>
+<script>
+  // ---- 记一笔 ----
+  const addSheet = document.getElementById('add-sheet');
+  const addPanel = addSheet.querySelector('.panel');
+  const addMask = addSheet.querySelector('.mask');
+  let addCat = '食品', addUnit = 30;
+  addSheet.querySelectorAll('[data-cat]').forEach(s => s.addEventListener('click', () => {
+    addCat = s.dataset.cat;
+    addSheet.querySelectorAll('[data-cat]').forEach(x => x.classList.toggle('on', x === s));
+  }));
+  addSheet.querySelectorAll('[data-unit]').forEach(s => s.addEventListener('click', () => {
+    addUnit = parseInt(s.dataset.unit);
+    addSheet.querySelectorAll('[data-unit]').forEach(x => x.classList.toggle('on', x === s));
+  }));
+  document.getElementById('fab').addEventListener('click', () => {
+    document.getElementById('add-name').value = '';
+    document.getElementById('add-qty').value = 1;
+    document.getElementById('add-prod').value = new Date().toISOString().slice(0, 10);
+    updateProdDisplay();
+    addSheet.style.display = 'block';
+    requestAnimationFrame(() => { addMask.style.opacity = 1; addPanel.style.transform = 'none'; });
+  });
+  function closeAdd() {
+    addMask.style.opacity = 0;
+    addPanel.style.transform = 'translateY(110%)';
+    setTimeout(() => (addSheet.style.display = 'none'), 200);
+  }
+  addMask.addEventListener('click', closeAdd);
+  // 生产日期：整行可点，弹原生日期选择；显示友好文案
+  const prodInput = document.getElementById('add-prod');
+  function updateProdDisplay() {
+    const v = prodInput.value;
+    const today = new Date().toISOString().slice(0, 10);
+    document.getElementById('prod-display').textContent = !v ? '请选择' : v === today ? '今天' : v;
+    document.getElementById('prod-display').style.color = !v ? 'var(--text-2)' : 'var(--text)';
+  }
+  prodInput.addEventListener('change', updateProdDisplay);
+  document.getElementById('row-prod').addEventListener('click', () => prodInput.showPicker?.() ?? prodInput.click());
+  // 数量 stepper
+  const qtyInput = document.getElementById('add-qty');
+  document.getElementById('qty-minus').addEventListener('click', () => qtyInput.value = Math.max(1, (parseInt(qtyInput.value) || 1) - 1));
+  document.getElementById('qty-plus').addEventListener('click', () => qtyInput.value = (parseInt(qtyInput.value) || 0) + 1);
+  document.getElementById('add-cancel').addEventListener('click', closeAdd);
+  document.getElementById('add-save').addEventListener('click', () => {
+    const name = document.getElementById('add-name').value.trim();
+    if (!name) { document.getElementById('add-name').focus(); return; }
+    const qty = Math.max(1, parseInt(document.getElementById('add-qty').value) || 1);
+    const prod = document.getElementById('add-prod').value || new Date().toISOString().slice(0, 10);
+    const days = Math.max(1, (parseInt(document.getElementById('add-life').value) || 6) * addUnit);
+    const expiry = new Date(new Date(prod).getTime() + days * 86400e3).toISOString().slice(0, 10);
+    const remaining = Math.round((new Date(expiry) - new Date()) / 86400e3);
+    apiFetch('/foods', {
+      method: 'POST',
+      body: JSON.stringify({
+        name, quantity: qty, category: addCat,
+        production_date: prod, shelf_life_days: days,
+      }),
+    }).then(async () => { closeAdd(); await loadFoods(); }).catch(alertErr);
+  });
+  // ---- 墨水屏页 ----
+  function fmtTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+  async function loadEpd() {
+    try {
+      // 预览图需要 Authorization 头，用 blob 加载
+      try {
+        const resp = await fetch('/api/epd/preview.png', {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        });
+        if (resp.ok) {
+          document.getElementById('epd-preview').src = URL.createObjectURL(await resp.blob());
+        }
+      } catch (_) {}
+      const s = await apiFetch('/epd/status');
+      const reasonMap = { manual: '手动刷新', change: '数据变更自动推送', daily: '0 点定时推送', boot: '启动推送' };
+      document.getElementById('push-reason').textContent = reasonMap[s.reason] || s.reason || '—';
+      document.getElementById('push-detail').textContent =
+        s.in_progress ? `进行中 · 设备 ${s.device || '—'}`
+        : s.error ? `失败：${s.error}`
+        : `${(s.items || []).length} 条食品 · 耗时 ${s.duration_s ?? '—'}s · ${s.started_at ? fmtTime(s.started_at) : '—'}`;
+      const res = document.getElementById('push-result');
+      res.textContent = s.in_progress ? '推送中' : s.ok === null ? '' : s.ok ? '成功' : '失败';
+      res.style.color = s.ok === false ? 'var(--red)' : 'var(--accent)';
+      document.getElementById('epd-last').textContent = s.finished_at ? fmtTime(s.finished_at) : '—';
+      const dev = await apiFetch('/ota/device').catch(() => null);
+      if (dev) {
+        document.getElementById('dev-name').textContent = dev.device;
+        document.getElementById('dev-info').textContent = `固件 v${dev.version_hex}`;
+        document.getElementById('dev-online').textContent = '在线';
+      } else {
+        document.getElementById('dev-online').textContent = '离线';
+      }
+    } catch (err) { console.error(err); }
+  }
+  document.getElementById('btn-push').addEventListener('click', async function () {
+    this.disabled = true; this.textContent = '刷新中…';
+    try {
+      await apiFetch('/epd/push', { method: 'POST' });
+      const poll = setInterval(async () => {
+        const s = await apiFetch('/epd/status');
+        if (!s.in_progress) { clearInterval(poll); this.disabled = false; this.textContent = '立即刷新墨水屏'; loadEpd(); }
+      }, 3000);
+    } catch (err) { alertErr(err); this.disabled = false; this.textContent = '立即刷新墨水屏'; }
+  });
+
+  // ---- 固件页 ----
+  function fwRow(f) {
+    return `
+    <div class="cell">
+      <div class="row">
+        <div class="avatar">v${f.app_version_hex || (f.app_version ?? '?').toString(16)}</div>
+        <div class="info">
+          <div class="name">${esc(f.filename)} </div>
+          <div class="sub">${(f.size / 1024).toFixed(1)} KB · ${f.uploaded_at ? f.uploaded_at.slice(5, 16).replace('T', ' ') : ''} · sha256 ${String(f.sha256).slice(0, 4)}…${String(f.sha256).slice(-4)}</div>
+        </div>
+        <span class="val" style="color:var(--blue);cursor:pointer" onclick="otaStart(${f.id})">升级</span>
+        <span class="val" style="color:var(--red);cursor:pointer" onclick="fwDelete(${f.id})">删除</span>
+      </div>
+      <div class="sep"></div>
+    </div>`;
+  }
+  async function loadFw() {
+    try {
+      const list = await apiFetch('/ota/firmware');
+      document.getElementById('fw-list').innerHTML =
+        list.length ? list.map(fwRow).join('') : '<div class="empty-eaten">暂无固件包，从下方上传</div>';
+      const dev = await apiFetch('/ota/device').catch(() => null);
+      if (dev) {
+        document.getElementById('fw-cur-badge').textContent = 'v' + dev.version_hex.slice(2);
+        document.getElementById('fw-cur-name').textContent = dev.device;
+        const latest = list.length ? list.reduce((a, b) => (a.app_version > b.app_version ? a : b)) : null;
+        const tag = document.getElementById('fw-cur-tag');
+        if (latest && dev.version >= latest.app_version) { tag.style.display = ''; tag.textContent = '最新'; }
+        else if (latest) { tag.style.display = ''; tag.textContent = '可升级'; tag.classList.add('blue'); }
+      }
+    } catch (err) { console.error(err); }
+  }
+  async function fwDelete(id) {
+    if (!confirm('删除该固件包？')) return;
+    await apiFetch('/ota/firmware/' + id, { method: 'DELETE' }).catch(alertErr);
+    loadFw();
+  }
+  async function otaStart(id) {
+    try {
+      await apiFetch('/ota/push?firmware_id=' + id, { method: 'POST' });
+      document.getElementById('fw-progress').style.display = '';
+      document.getElementById('fw-prog-title').textContent = 'OTA 升级中';
+      const poll = setInterval(async () => {
+        const s = await apiFetch('/ota/status');
+        const pct = s.total_bytes ? Math.round(100 * (s.sent_bytes || 0) / s.total_bytes) : 0;
+        document.getElementById('fw-prog-pct').textContent = pct + '%';
+        document.getElementById('fw-prog-sub').textContent =
+          s.error ? `失败：${s.error}` : `${s.sent_bytes ?? 0} / ${s.total_bytes ?? '?'} 字节`;
+        document.getElementById('fw-prog-sub').style.color = s.error ? 'var(--red)' : '';
+        document.querySelector('#fw-progress .bar i').style.width = pct + '%';
+        if (!s.in_progress) {
+          clearInterval(poll);
+          document.getElementById('fw-prog-title').textContent = s.ok ? '升级完成，设备重启中' : '升级失败';
+          setTimeout(() => { document.getElementById('fw-progress').style.display = 'none'; loadFw(); }, 3000);
+        }
+      }, 2000);
+    } catch (err) { alertErr(err); }
+  }
+  document.getElementById('fw-upload').addEventListener('click', () => document.getElementById('fw-file').click());
+  document.getElementById('fw-file').addEventListener('change', async function () {
+    const file = this.files[0];
+    if (!file) return;
+    await apiFetch('/ota/firmware?filename=' + encodeURIComponent(file.name), {
+      method: 'POST', body: file,
+      headers: { 'Content-Type': 'application/octet-stream' },
+    }).then(() => loadFw()).catch(alertErr);
+  });
+
+  renderList();
+</script>
+
+<script>
+  // 右滑露出操作（微信式）：鼠标 + 触摸
+  const OPEN = 78 * 2;
+  let drag = null;
+  function bindCells() {
+    document.querySelectorAll('#food-list .cell').forEach(cell => {
+      if (cell.dataset.bound) return;
+      cell.dataset.bound = '1';
+      cell.querySelectorAll('.actions button').forEach(b => (b.style.transform = `translateX(${OPEN}px)`));
+      const row = cell.querySelector('.row');
+      const start = e => {
+        const x = e.touches ? e.touches[0].clientX : e.clientX;
+        drag = { cell, row, x0: x, cur: parseFloat(row.dataset.x || 0), moved: false,
+                 t0: performance.now() };
+      };
+      row.addEventListener('touchstart', start, { passive: true });
+      row.addEventListener('mousedown', start);
+    });
+  }
+  const move = e => {
+    if (!drag) return;
+    const x = e.touches ? e.touches[0].clientX : e.clientX;
+    const dx = Math.max(0, Math.min(OPEN, drag.cur + (drag.x0 - x)));  // 左滑为正
+    if (Math.abs(drag.x0 - x) < 4 && !drag.moved) return;
+    drag.moved = true;
+    drag.cell.classList.remove('settling');
+    drag.row.style.transform = `translateX(${-dx}px)`;
+    drag.row.dataset.x = dx;
+    // 堆叠推挤：右起第一个按钮走更快，依次跟出
+    drag.cell.querySelectorAll('.actions button').forEach((b, i) => {
+      b.style.transform = `translateX(${Math.max(0, OPEN - dx * (1 + 0.6 * i))}px)`;
+    });
+    if (e.cancelable) e.preventDefault();
+  };
+  const end = () => {
+    if (!drag) return;
+    if (drag.moved) window.__justDragged = true;
+    const dx = parseFloat(drag.row.dataset.x || 0);
+    // 大幅度快速左滑：直接触发主操作（吃完了/喝完了）
+    // 微信式甩动：速度为主（>0.5px/ms ≈ 500px/s，随手一甩就有）、幅度轻扫 40px+
+    const vAvg = dx / Math.max(1, performance.now() - drag.t0);
+    if (dx > 40 && vAvg > 0.5) {
+      const btn = drag.cell.querySelector('.actions button:not(.more)');
+      drag.row.style.transition = 'transform .18s ease-out';
+      drag.row.style.transform = 'translateX(0)';
+      drag.row.dataset.x = 0;
+      drag.cell.querySelectorAll('.actions button').forEach(b => {
+        b.style.transition = 'transform .18s ease-out';
+        b.style.transform = `translateX(${OPEN}px)`;
+      });
+      // 甩动触发：吃完了/喝完了（已吃完条目为恢复）
+      const id = parseInt(drag.cell.dataset.id);
+      const f = foods.find(x => x.id === id);
+      const isEatAction = !f.eaten;
+      setEaten(id, !isEatAction ? false : true);
+      window.__justDragged = true;
+      drag = null;
+      return;
+    }
+    const target = dx > OPEN / 2 ? OPEN : 0;
+    drag.cell.classList.add('settling');
+    drag.row.style.transform = `translateX(${-target}px)`;
+    drag.row.dataset.x = target;
+    drag.cell.querySelectorAll('.actions button').forEach((b, i) => {
+      b.style.transform = `translateX(${OPEN - target}px)`;
+    });
+    drag = null;
+  };
+  document.addEventListener('touchmove', move, { passive: false });
+  document.addEventListener('mousemove', move);  // 触控板/鼠标拖拽
+  document.addEventListener('touchend', end);
+  document.addEventListener('mouseup', e => { end(); });
+  bindCells();  // script1 的 renderList 调用时本函数尚未定义，这里补一次绑定
+
+  // 操作按钮（事件委托，DOM 由 renderList 重建）
+  document.getElementById('food-list').addEventListener('click', e => {
+    const btn = e.target.closest('.actions button');
+    if (!btn) return;
+    const id = parseInt(btn.closest('.cell').dataset.id);
+    if (btn.classList.contains('act-eat')) (btn.textContent === '恢复' ? restoreFood(id) : consumeFood(id)).catch(alertErr);
+    else if (btn.classList.contains('more')) editFood(id);
+    window.__justDragged = false;
+  });
+
+  // ---- 点击条目 → 底部 ActionSheet（微信式） ----
+  const sheet = document.createElement('div');
+  sheet.id = 'action-sheet';
+  sheet.style.cssText = 'position:fixed;inset:0;display:none;z-index:50';
+  sheet.innerHTML = `
+    <div class="mask" style="position:absolute;inset:0;background:rgba(0,0,0,.45);opacity:0;transition:opacity .18s"></div>
+    <div class="panel" style="position:absolute;left:0;right:0;bottom:0;padding:8px 10px calc(12px + env(safe-area-inset-bottom));transform:translateY(110%);transition:transform .22s ease-out;max-width:520px;margin:0 auto">
+      <div class="sheet-title" style="color:var(--text-2);font-size:13px;text-align:center;padding:12px 0 4px"></div>
+      <div class="sheet-btns" style="background:var(--cell);border-radius:14px;overflow:hidden;margin-top:6px"></div>
+      <div class="sheet-cancel" style="background:var(--cell);border-radius:14px;text-align:center;padding:14px;font-size:16px;font-weight:600;margin-top:8px;cursor:pointer">取消</div>
+    </div>`;
+  document.body.appendChild(sheet);
+  const mask = sheet.querySelector('.mask');
+  const panel = sheet.querySelector('.panel');
+  const title = sheet.querySelector('.sheet-title');
+  const btns = sheet.querySelector('.sheet-btns');
+  let currentFood = null;
+
+  function openSheet(cell) {
+    currentFood = cell;
+    title.textContent = cell.querySelector('.name').textContent;
+    const f = foods.find(x => x.id === parseInt(cell.dataset.id));
+    if (!f) return;
+    const doneWord = f.category === '饮品' ? '喝完了' : '吃完了';
+    const run = p => p.catch(alertErr);
+    const items = f.consumed_at
+      ? [['恢复', 'var(--blue)', () => run(restoreFood(f.id))], ['删除', 'var(--red)', () => run(removeFood(f.id))]]
+      : [[doneWord, 'var(--blue)', () => run(consumeFood(f.id))], ['编辑', 'var(--blue)', () => run(editFood(f.id))], ['删除', 'var(--red)', () => run(removeFood(f.id))]];
+    btns.innerHTML = '';
+    items.forEach(([label, color, fn], i) => {
+      const b = document.createElement('div');
+      b.textContent = label;
+      b.style.cssText = `text-align:center;padding:14px;font-size:16px;color:${color};cursor:pointer${i ? ';border-top:1px solid var(--sep)' : ''}`;
+      b.onclick = () => { closeSheet(); if (fn) fn(); };
+      btns.appendChild(b);
+    });
+    sheet.style.display = 'block';
+    requestAnimationFrame(() => { mask.style.opacity = 1; panel.style.transform = 'none'; });
+  }
+  function closeSheet() {
+    mask.style.opacity = 0;
+    panel.style.transform = 'translateY(110%)';
+    setTimeout(() => (sheet.style.display = 'none'), 200);
+  }
+  mask.onclick = closeSheet;
+  sheet.querySelector('.sheet-cancel').onclick = closeSheet;
+
+  // 点击条目弹出（拖拽过的点击不算）——事件委托，兼容 renderList 重建
+  document.getElementById('food-list').addEventListener('click', e => {
+    const row = e.target.closest('.row');
+    if (!row || e.target.closest('.actions')) return;
+    if (window.__justDragged) { window.__justDragged = false; return; }
+    openSheet(row.closest('.cell'));
+  });
+</script>
+
+<script>
+  const titles = { home: '食管家', epd: '墨水屏', fw: '固件', set: '设置' };
+  function showTab(name) {
+    document.querySelectorAll('.page').forEach(p =>
+      p.classList.toggle('active', p.dataset.page === name));
+    document.getElementById('fab').style.display = name === 'home' ? '' : 'none';
+    document.querySelectorAll('.tab').forEach(t =>
+      t.classList.toggle('on', t.dataset.tab === name));
+    document.getElementById('nav-title').textContent = titles[name];
+    document.querySelector('.page.active').scrollTop = 0;
+    if (name === 'epd') loadEpd();
+    if (name === 'fw') loadFw();
+  }
+  document.querySelectorAll('.tab').forEach(t =>
+    t.addEventListener('click', () => showTab(t.dataset.tab)));
+  showTab('home');
+</script>
+
+</body>
+</html>

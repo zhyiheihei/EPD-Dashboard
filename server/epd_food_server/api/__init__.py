@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import hmac
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, status
+from fastapi.responses import RedirectResponse
 
 from ..config import PRESET_CATEGORIES, Config
 from ..db import Database
@@ -16,6 +18,8 @@ from . import foods as foods_api
 from . import ota as ota_api
 
 __all__ = ["build_app", "make_auth_dependency"]
+
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
 def make_auth_dependency(cfg: Config):
@@ -66,6 +70,10 @@ def build_app(cfg: Config, db: Database) -> FastAPI:
             error = str(exc)
         return {"ok": db_ok, "db": db_ok, "error": error}
 
+    @app.get("/", include_in_schema=False)
+    def root():
+        return RedirectResponse(url="/ui/")
+
     @app.get("/api/meta", tags=["meta"])
     def meta() -> dict:
         font = find_font(cfg.font_path)
@@ -74,5 +82,11 @@ def build_app(cfg: Config, db: Database) -> FastAPI:
             "font_available": font is not None,
             "font_path": font,
         }
+
+    # WebUI 静态页面：无鉴权（页面本身无数据，API 另行鉴权）
+    if STATIC_DIR.is_dir():
+        from fastapi.staticfiles import StaticFiles
+
+        app.mount("/ui", StaticFiles(directory=STATIC_DIR, html=True), name="ui")
 
     return app

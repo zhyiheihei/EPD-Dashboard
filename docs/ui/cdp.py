@@ -51,10 +51,15 @@ class Browser:
         self.ws.send(json.dumps({"id": self._id, "method": method, "params": params}))
         while True:
             msg = json.loads(self.ws.recv())
+            if msg.get("method") == "Page.javascriptDialogOpening":
+                self.send("Page.handleJavaScriptDialog", accept=True)
+                continue
             if msg.get("id") == self._id:
                 return msg.get("result", {})
 
     def navigate(self, url: str):
+        # 自动处理 JS 弹窗（prompt/confirm），避免阻塞页面
+        self.send("Page.enable")
         self.send("Page.navigate", url=url)
 
     def js(self, expr: str):

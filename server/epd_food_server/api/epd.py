@@ -6,6 +6,7 @@ import asyncio
 from typing import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import Response as HTTPResponse
 
 from ..config import DRINK_CATEGORY
 from ..models import PushPreviewItem
@@ -56,5 +57,46 @@ def create_router(auth: Callable) -> APIRouter:
                 )
             )
         return items
+
+    @router.get("/epd/preview.png", tags=["epd"])
+    def push_preview_png(request: Request):
+        """生成 800x480 看板预览 PNG（与固件布局对齐的简化版）。"""
+        import io
+
+        from PIL import Image, ImageDraw
+
+        cfg = request.app.state.cfg
+        db = request.app.state.db
+        font = find_font(cfg.font_path)
+        if font is None:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "未找到可用中文字体，无法渲染预览",
+            )
+        from PIL import ImageFont
+
+        font_path = font  # find_font 返回的是路径字符串
+        font = ImageFont.truetype(font_path, 20)
+        font_big = ImageFont.truetype(font_path, 28)
+        img = Image.new("RGB", (800, 480), "white")
+        draw = ImageDraw.Draw(img)
+        # 左侧日历占位（与固件布局一致的简单日历）
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).astimezone()
+        draw.text((40, 40), f"{now.year}年{now.month}月", fill="black", font=font_big)
+        draw.text((40, 90), f"{now.day}日 周{'一二三四五六日'[now.weekday()]}", fill="black", font=font)
+        draw.line((424, 10, 424, 470), fill="black", width=2)
+        # 右侧食品面板
+        draw.rectangle((430, 190, 790, 470), outline="black", width=1)
+        draw.text((444, 200), "食品到期", fill="black", font=font_big)
+        draw.line((442, 232, 718, 232), fill="red", width=2)
+        for index, row in enumerate(db.top_for_display(limit=4)):
+            bitmap = render_text_1bit(row["name"], FOOD_BITMAP_WIDTH, FOOD_BITMAP_HEIGHT, font_path)
+            tile = Image.frombytes("1", (FOOD_BITMAP_WIDTH, FOOD_BITMAP_HEIGHT), bytes(bitmap))
+            img.paste(tile.convert("L"), (488, 246 + index * 64))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return HTTPResponse(content=buf.getvalue(), media_type="image/png")
 
     return router

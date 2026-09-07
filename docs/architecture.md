@@ -68,11 +68,21 @@ epd_food_server/
 ├── render.py    Pillow：文本 → 1-bit 位图（18px 起步缩放 → 省略号截断）
 ├── protocol.py  看板协议 v1 纯函数（帧构造/解析/CRC），可独立单测
 ├── ble.py       bleak 会话：扫描/连接/通知路由/事务流程
-├── pusher.py    推送编排：Top4 选择、文件锁、状态落盘、防抖
+├── pusher.py    推送编排：Top4 选择、文件锁、防抖、变更节流（30 分钟）
+├── static/      WebUI 单页应用（挂 /ui，/ 重定向；原型 docs/ui/prototype-final.html）
 └── api/
     ├── foods.py /api/foods CRUD + stats + meta
-    └── epd.py   /api/epd push/status/preview + /api/health
+    ├── epd.py   /api/epd push/status/preview(.png) + /api/health
+    └── ota.py   /api/ota firmware 上传/列表/删除、设备版本、升级
 ```
+
+### WebUI
+
+浏览器直接访问 `http://服务端:端口/`（重定向到 `/ui/`）。四页：库存（微信风列表，
+左滑/甩动吃完、点击菜单、记一笔、已吃完折叠分组、FLIP 动画）、墨水屏（真实布局
+预览 + 推送状态 + 手动刷新）、固件（OTA 管理）、设置。鉴权：服务端配置了
+API_TOKEN 时首次访问需在页内顶栏输入令牌（存 localStorage）。端到端回归：
+`docs/ui/webtest.py`（需服务运行中）。
 
 ## 关键环境变量（NixOS 模块注入）
 
@@ -86,6 +96,7 @@ epd_food_server/
 | `EPD_FOOD_PUSH_ON_CHANGE` | true | 数据变更后防抖即时推送 |
 | `EPD_FOOD_PUSH_DEBOUNCE` | 10 秒 | 合并连续写入 |
 | `EPD_FOOD_FULL_REFRESH_EVERY` | 8 | 每 N 次推送强制全刷清残影；0 = 始终全刷 |
+| `EPD_FOOD_CHANGE_MIN_INTERVAL` | 1800 秒 | 条目变更推送最小间隔（节流），变更留待 0 点或下次变更一并上屏 |
 | `EPD_FOOD_COMMIT_SLEEP` | true | COMMIT 是否带休眠标志（调试局部刷新用） |
 | `EPD_FOOD_STATE_DIR` | `/var/lib/epd-dashboard` | 锁与推送状态文件目录 |
 
