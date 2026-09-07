@@ -642,13 +642,14 @@
 
   function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-  // ---- FLIP 动画：数据变更前记录位置，重渲染后从旧位置滑到新位置 ----
-  function withFlip(mutate) {
+  // ---- FLIP 动画：变更前 capturePositions()，重渲染后 playFlip(old) 回放 ----
+  function capturePositions() {
     const old = new Map();
     document.querySelectorAll('#food-list .cell').forEach(c =>
       old.set(c.dataset.id, c.getBoundingClientRect().top));
-    mutate();
-    renderList();
+    return old;
+  }
+  function playFlip(old) {
     document.querySelectorAll('#food-list .cell').forEach(c => {
       const prev = old.get(c.dataset.id);
       if (prev === undefined) {
@@ -666,25 +667,24 @@
       });
     });
   }
+  // 异步操作通用包装：捕获 → API → 重载 → 回放
+  async function withFlipAsync(fn) {
+    const old = capturePositions();
+    await fn();
+    await loadFoods();
+    playFlip(old);
+  }
 
-  async function consumeFood(id) {
-    await apiFetch(`/foods/${id}`, { method: 'DELETE' });
-    await loadFoods();
-  }
-  async function restoreFood(id) {
-    await apiFetch(`/foods/${id}/restore`, { method: 'POST' });
-    await loadFoods();
-  }
-  async function removeFood(id) {
-    await apiFetch(`/foods/${id}?hard=true`, { method: 'DELETE' });
-    await loadFoods();
-  }
+  const consumeFood = id => withFlipAsync(() => apiFetch(`/foods/${id}`, { method: 'DELETE' }));
+  const restoreFood = id => withFlipAsync(() => apiFetch(`/foods/${id}/restore`, { method: 'POST' }));
+  const removeFood = id => withFlipAsync(() => apiFetch(`/foods/${id}?hard=true`, { method: 'DELETE' }));
   async function editFood(id) {
     const f = foods.find(x => x.id === id);
     const v = prompt(`修改「${f.name}」数量`, f.quantity);
     if (v === null) return;
-    await apiFetch(`/foods/${id}`, { method: 'PATCH', body: JSON.stringify({ quantity: Math.max(1, parseInt(v) || 1) }) });
-    await loadFoods();
+    await withFlipAsync(() => apiFetch(`/foods/${id}`, {
+      method: 'PATCH', body: JSON.stringify({ quantity: Math.max(1, parseInt(v) || 1) }),
+    }));
   }
 
   // 已吃完分组折叠
@@ -781,7 +781,12 @@
         name, quantity: qty, category: addCat,
         production_date: prod, shelf_life_days: days,
       }),
-    }).then(async () => { closeAdd(); await loadFoods(); }).catch(alertErr);
+    }).then(async () => {
+      closeAdd();
+      const old = capturePositions();
+      await loadFoods();
+      playFlip(old);
+    }).catch(alertErr);
   });
   // ---- 墨水屏页 ----
   function fmtTime(iso) {
