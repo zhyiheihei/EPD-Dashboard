@@ -596,7 +596,9 @@
     renderList();
   }
 
-  const sortByUrgency = list => list.sort((a, b) => a.days_remaining - b.days_remaining);
+  // 组内排序：访问频率（interaction_count 降序）优先，其次临期程度
+  const sortByUrgency = list =>
+    list.sort((a, b) => (b.interaction_count || 0) - (a.interaction_count || 0) || a.days_remaining - b.days_remaining);
 
   function renderList() {
     const list = document.getElementById('food-list');
@@ -954,8 +956,10 @@
       // 甩动触发：吃完了/喝完了（已吃完条目为恢复）
       const id = parseInt(drag.cell.dataset.id);
       const f = foods.find(x => x.id === id);
-      const isEatAction = !f.eaten;
-      setEaten(id, !isEatAction ? false : true);
+      if (f) {
+        if (f.consumed_at) restoreFood(id).catch(alertErr);
+        else consumeFood(id).catch(alertErr);
+      }
       window.__justDragged = true;
       drag = null;
       return;

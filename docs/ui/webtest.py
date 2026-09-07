@@ -75,6 +75,7 @@ time.sleep(1.2)
 check("恢复后回到在库区", b.js(f"foods.find(f => f.id === {new_item}).consumed_at === null"))
 
 # 硬删除（清理测试数据）
+b.js("window.__justDragged = false")
 b.js(f"document.querySelector(\"[data-id='{new_item}'] .row\").click()")
 time.sleep(0.4)
 b.js("[...document.querySelectorAll('#action-sheet .sheet-btns > div')].find(d => d.textContent === '删除').click()")

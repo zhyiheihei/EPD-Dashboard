@@ -39,6 +39,7 @@ class FoodOut(BaseModel):
     expiry_date: date
     days_remaining: int
     device_type: int  # 0=食品 1=饮品（与墨水屏协议对应）
+    interaction_count: int
     created_at: datetime
     updated_at: datetime
     consumed_at: datetime | None
@@ -65,6 +66,7 @@ def food_out(row: dict[str, Any]) -> FoodOut:
         expiry_date=row["expiry_date"],
         days_remaining=row["days_remaining"],
         device_type=1 if row["category"] == DRINK_CATEGORY else 0,
+        interaction_count=row["interaction_count"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         consumed_at=row["consumed_at"],

@@ -23,8 +23,12 @@ SCHEMA_STATEMENTS = (
         quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity BETWEEN 1 AND 9999),
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        consumed_at TIMESTAMPTZ
+        consumed_at TIMESTAMPTZ,
+        interaction_count INTEGER NOT NULL DEFAULT 0
     )
+    """,
+    """
+    ALTER TABLE foods ADD COLUMN IF NOT EXISTS interaction_count INTEGER NOT NULL DEFAULT 0
     """,
     """
     CREATE INDEX IF NOT EXISTS foods_active_expiry_idx
@@ -93,7 +97,7 @@ class Database:
         with self._conn().cursor() as cur:
             cur.execute(
                 f"""
-                SELECT id, name, category, production_date, shelf_life_days, quantity,
+                SELECT id, name, category, production_date, shelf_life_days, quantity, interaction_count,
                        (production_date + shelf_life_days)::date AS expiry_date,
                        created_at, updated_at, consumed_at
                 FROM foods {where} ORDER BY {order_sql}
@@ -107,7 +111,7 @@ class Database:
         with self._conn().cursor() as cur:
             cur.execute(
                 """
-                SELECT id, name, category, production_date, shelf_life_days, quantity,
+                SELECT id, name, category, production_date, shelf_life_days, quantity, interaction_count,
                        (production_date + shelf_life_days)::date AS expiry_date,
                        created_at, updated_at, consumed_at
                 FROM foods WHERE id = %s
@@ -177,7 +181,7 @@ class Database:
         sets = ", ".join(f"{column} = %s" for column in updates)
         with self._conn().cursor() as cur:
             cur.execute(
-                f"UPDATE foods SET {sets}, updated_at = now() WHERE id = %s",
+                f"UPDATE foods SET {sets}, updated_at = now(), interaction_count = interaction_count + 1 WHERE id = %s",
                 (*updates.values(), food_id),
             )
         return self.get_food(food_id)
@@ -188,7 +192,8 @@ class Database:
                 """
                 UPDATE foods
                 SET consumed_at = CASE WHEN %s THEN now() ELSE NULL END,
-                    updated_at = now()
+                    updated_at = now(),
+                    interaction_count = interaction_count + 1
                 WHERE id = %s
                 """,
                 (consumed, food_id),

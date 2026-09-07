@@ -15,6 +15,8 @@ class Browser:
                 "google-chrome", "--headless=new", "--disable-gpu", "--no-sandbox",
                 f"--remote-debugging-port={port}", f"--window-size={width},{height}",
                 "--remote-allow-origins=*", "--hide-scrollbars", "about:blank",
+                f"--user-data-dir=/tmp/cdp-profile-{port}",  # 独立 profile，避免磁盘缓存旧页面
+                "--disable-back-forward-cache",
             ],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
