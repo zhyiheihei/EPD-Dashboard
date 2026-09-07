@@ -25,6 +25,7 @@ def _row(id: int, name: str, days: int, category: str = "食品", quantity: int 
         "quantity": quantity,
         "expiry_date": expiry,
         "days_remaining": (expiry - date(2026, 9, 7)).days,
+        "interaction_count": 0,
         "created_at": now,
         "updated_at": now,
         "consumed_at": consumed,
