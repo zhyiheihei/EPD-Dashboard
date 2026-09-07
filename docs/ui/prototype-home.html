@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>食管家 · 原型 v2</title>
+<style>
+  :root {
+    --bg: #ededed;
+    --nav: #f7f7f7;
+    --cell: #ffffff;
+    --text: #191919;
+    --text-2: #888888;
+    --sep: rgba(0,0,0,.06);
+    --accent: #07c160;        /* 微信绿 */
+    --accent-pressed: #06ad56;
+    --red: #fa5151;
+    --orange: #ff9900;
+    --blue: #576b95;          /* 微信链接蓝 */
+    --swipe-eat: #07c160;
+    --swipe-more: #c8c8cd;
+    --badge-bg: #fa5151;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111111;
+      --nav: #191919;
+      --cell: #191919;
+      --text: #e8e8e8;
+      --text-2: #7d7d7d;
+      --sep: rgba(255,255,255,.07);
+      --accent: #07c160;
+      --red: #fa5151;
+      --orange: #ff9900;
+      --blue: #7d90b8;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
+    max-width: 520px; margin: 0 auto; display: flex; flex-direction: column;
+    -webkit-font-smoothing: antialiased; overflow: hidden;
+  }
+
+  /* ---- 顶部导航（微信式） ---- */
+  .navbar {
+    background: var(--nav); padding: env(safe-area-inset-top) 16px 0;
+    border-bottom: 1px solid var(--sep); flex: none;
+  }
+  .navbar .bar { display: flex; align-items: center; height: 52px; }
+  .navbar h1 { font-size: 17px; font-weight: 600; flex: 1; }
+  .navbar .navbtn { color: var(--text-2); font-size: 13px; padding: 6px 2px 6px 12px; cursor: pointer; }
+  .navbar .sub { color: var(--text-2); font-size: 12px; padding: 0 4px 10px; }
+
+  /* ---- 列表（微信 cell 式） ---- */
+  .list { flex: 1; overflow-y: auto; padding-bottom: 20px; }
+  .group-title {
+    color: var(--text-2); font-size: 12.5px; padding: 14px 16px 7px;
+  }
+  .cell { position: relative; background: var(--cell); overflow: hidden; }
+  .cell .actions {
+    position: absolute; top: 0; bottom: 0; right: 0; width: 157px; display: flex;
+  }
+  .cell.settling .row, .cell.settling .actions button { transition: transform .18s ease-out; }
+  .cell .actions button {
+    border: none; width: 78px; color: #fff; font-size: 14px; cursor: pointer;
+    background: var(--accent);
+  }
+  .cell .actions button.more { background: var(--swipe-more); color: #fff; margin-left: 1px; }
+  .cell .row {
+    position: relative; display: flex; align-items: center; gap: 12px;
+    padding: 11px 16px; background: var(--cell); touch-action: pan-y;
+    transition: transform .12s ease-out;
+  }
+  .cell.open .row { transition: transform .18s ease-out; }
+  .avatar {
+    width: 46px; height: 46px; border-radius: 8px; flex: none;
+    display: flex; align-items: center; justify-content: center; font-size: 22px;
+    background: var(--bg);
+  }
+  .cell .info { flex: 1; min-width: 0; }
+  .cell .top { display: flex; align-items: baseline; gap: 6px; }
+  .cell .name { font-size: 16px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cell .qty { color: var(--text-2); font-size: 13px; flex: none; }
+  .cell .sub { color: var(--text-2); font-size: 13px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cell .right { flex: none; text-align: right; }
+  .cell .expiry { color: var(--text-2); font-size: 12px; }
+  .pill {
+    display: inline-block; margin-top: 4px; font-size: 11.5px; padding: 1px 8px;
+    border-radius: 5px; color: #fff; background: var(--red);
+  }
+  .pill.orange { background: var(--orange); }
+  .pill.green { background: var(--accent); }
+  .cell .sep { position: absolute; left: 74px; right: 0; bottom: 0; height: 1px; background: var(--sep); }
+
+  .hint { color: var(--text-2); font-size: 12px; text-align: center; padding: 18px 0 6px; }
+
+  /* ---- 底部 tab（微信式） ---- */
+  .tabbar {
+    flex: none; background: var(--nav); border-top: 1px solid var(--sep);
+    display: flex; padding: 6px 0 env(safe-area-inset-bottom);
+  }
+  .tab { flex: 1; text-align: center; color: var(--text-2); font-size: 11px; padding: 3px 0; cursor: pointer; }
+  .tab .ic { font-size: 22px; display: block; }
+  .tab.on { color: var(--accent); }
+</style>
+</head>
+<body>
+  <div class="navbar">
+    <div class="bar">
+      <h1>食管家</h1>
+      <span class="navbtn">刷新墨水屏</span>
+    </div>
+  </div>
+
+  <div class="list">
+    <div class="group-title">已过期 · 12 件</div>
+
+    <div class="cell">
+      <div class="actions"><button>吃完了</button><button class="more">详情</button></div>
+      <div class="row">
+        <div class="avatar">🥯</div>
+        <div class="info">
+          <div class="top"><span class="name">光明牌小面包</span><span class="qty">×4</span></div>
+          <div class="sub">食品 · 到期 2026-05-02</div>
+        </div>
+        <div class="sep"></div>
+        <div class="right"><span class="expiry">2026-05-02</span><br><span class="pill">已过 128 天</span></div>
+      </div>
+    </div>
+
+    <div class="cell">
+      <div class="actions"><button>吃完了</button><button class="more">详情</button></div>
+      <div class="row">
+        <div class="avatar">🍰</div>
+        <div class="info">
+          <div class="top"><span class="name">蔓越莓蛋糕</span><span class="qty">×1</span></div>
+          <div class="sub">食品 · 到期 2026-05-02</div>
+        </div>
+        <div class="sep"></div>
+        <div class="right"><span class="expiry">2026-05-02</span><br><span class="pill">已过 128 天</span></div>
+      </div>
+    </div>
+
+    <div class="group-title">临期 · 3 天内</div>
+
+    <div class="cell">
+      <div class="actions"><button>吃完了</button><button class="more">详情</button></div>
+      <div class="row">
+        <div class="avatar">🍗</div>
+        <div class="info">
+          <div class="top"><span class="name">三只松鼠牌薄脆鸡胸肉</span><span class="qty">×2</span></div>
+          <div class="sub">食品 · 到期 2026-09-11</div>
+        </div>
+        <div class="sep"></div>
+        <div class="right"><span class="expiry">2026-09-11</span><br><span class="pill orange">剩 4 天</span></div>
+      </div>
+    </div>
+
+    <div class="group-title">在库 · 新鲜</div>
+
+    <div class="cell">
+      <div class="actions"><button>吃完了</button><button class="more">详情</button></div>
+      <div class="row">
+        <div class="avatar">🍵</div>
+        <div class="info">
+          <div class="top"><span class="name">加多宝凉茶</span><span class="qty">×13</span></div>
+          <div class="sub">饮品 · 到期 2027-01-20</div>
+        </div>
+        <div class="sep"></div>
+        <div class="right"><span class="expiry">2027-01-20</span><br><span class="pill green">剩 501 天</span></div>
+      </div>
+    </div>
+
+    <div class="cell">
+      <div class="actions"><button>吃完了</button><button class="more">详情</button></div>
+      <div class="row">
+        <div class="avatar">🍪</div>
+        <div class="info">
+          <div class="top"><span class="name">威化饼干</span><span class="qty">×1</span></div>
+          <div class="sub">食品 · 到期 2026-10-27</div>
+        </div>
+        <div class="sep"></div>
+        <div class="right"><span class="expiry">2026-10-27</span><br><span class="pill green">剩 50 天</span></div>
+      </div>
+    </div>
+
+    <div class="hint">← 在条目上左滑试试「吃完了」 →（点击条目也可弹出操作菜单）</div>
+  </div>
+
+  <div class="tabbar">
+    <div class="tab on"><span class="ic">🏠</span>库存</div>
+    <div class="tab"><span class="ic">📺</span>墨水屏</div>
+    <div class="tab"><span class="ic">⬆️</span>固件</div>
+    <div class="tab"><span class="ic">⚙️</span>设置</div>
+  </div>
+
+<script>
+  // 右滑露出操作（微信式）：鼠标 + 触摸
+  const OPEN = 78 * 2;
+  document.querySelectorAll('.actions button').forEach(b => (b.style.transform = `translateX(${OPEN}px)`));
+  let drag = null;
+  document.querySelectorAll('.cell').forEach(cell => {
+    const row = cell.querySelector('.row');
+    const start = e => {
+      const x = e.touches ? e.touches[0].clientX : e.clientX;
+      drag = { cell, row, x0: x, cur: parseFloat(row.dataset.x || 0), moved: false };
+    };
+    row.addEventListener('touchstart', start, { passive: true });
+    row.addEventListener('mousedown', start);
+  });
+  const move = e => {
+    if (!drag) return;
+    const x = e.touches ? e.touches[0].clientX : e.clientX;
+    const dx = Math.max(0, Math.min(OPEN, drag.cur + (drag.x0 - x)));  // 左滑为正
+    if (Math.abs(drag.x0 - x) < 4 && !drag.moved) return;
+    drag.moved = true;
+    drag.cell.classList.remove('settling');
+    drag.row.style.transform = `translateX(${-dx}px)`;
+    drag.row.dataset.x = dx;
+    // 堆叠推挤：右起第一个按钮走更快，依次跟出
+    drag.cell.querySelectorAll('.actions button').forEach((b, i) => {
+      b.style.transform = `translateX(${Math.max(0, OPEN - dx * (1 + 0.6 * i))}px)`;
+    });
+    if (e.cancelable) e.preventDefault();
+  };
+  const end = () => {
+    if (!drag) return;
+    if (drag.moved) window.__justDragged = true;
+    const dx = parseFloat(drag.row.dataset.x || 0);
+    const target = dx > OPEN / 2 ? OPEN : 0;
+    drag.cell.classList.add('settling');
+    drag.row.style.transform = `translateX(${-target}px)`;
+    drag.row.dataset.x = target;
+    drag.cell.querySelectorAll('.actions button').forEach((b, i) => {
+      b.style.transform = `translateX(${OPEN - target}px)`;
+    });
+    drag = null;
+  };
+  document.addEventListener('touchmove', move, { passive: false });
+  document.addEventListener('mousemove', move);  // 触控板/鼠标拖拽
+  document.addEventListener('touchend', end);
+  document.addEventListener('mouseup', e => { end(); });
+
+  // 点击操作按钮：演示态直接收起并变色
+  document.querySelectorAll('.actions button').forEach(btn => {
+    btn.addEventListener('click', e => {
+      const row = btn.closest('.cell').querySelector('.row');
+      row.style.transform = 'translateX(0)';
+      row.dataset.x = 0;
+      if (!btn.classList.contains('more')) {
+        const pill = row.querySelector('.pill');
+        pill.textContent = '已吃完';
+        pill.classList.remove('orange', 'green');
+        pill.style.background = 'var(--swipe-more)';
+      }
+    });
+  });
+
+  // ---- 点击条目 → 底部 ActionSheet（微信式） ----
+  const sheet = document.createElement('div');
+  sheet.style.cssText = 'position:fixed;inset:0;display:none;z-index:50';
+  sheet.innerHTML = `
+    <div class="mask" style="position:absolute;inset:0;background:rgba(0,0,0,.45);opacity:0;transition:opacity .18s"></div>
+    <div class="panel" style="position:absolute;left:0;right:0;bottom:0;padding:8px 10px calc(12px + env(safe-area-inset-bottom));transform:translateY(110%);transition:transform .22s ease-out;max-width:520px;margin:0 auto">
+      <div class="sheet-title" style="color:var(--text-2);font-size:13px;text-align:center;padding:12px 0 4px"></div>
+      <div class="sheet-btns" style="background:var(--cell);border-radius:14px;overflow:hidden;margin-top:6px"></div>
+      <div class="sheet-cancel" style="background:var(--cell);border-radius:14px;text-align:center;padding:14px;font-size:16px;font-weight:600;margin-top:8px;cursor:pointer">取消</div>
+    </div>`;
+  document.body.appendChild(sheet);
+  const mask = sheet.querySelector('.mask');
+  const panel = sheet.querySelector('.panel');
+  const title = sheet.querySelector('.sheet-title');
+  const btns = sheet.querySelector('.sheet-btns');
+  let currentFood = null;
+
+  function openSheet(cell) {
+    currentFood = cell;
+    title.textContent = cell.querySelector('.name').textContent;
+    const eaten = cell.querySelector('.pill').textContent === '已吃完';
+    const items = eaten
+      ? [['恢复', 'var(--blue)', () => fakeConsume(cell, true)], ['删除', 'var(--red)', null]]
+      : [['吃完了', 'var(--blue)', () => fakeConsume(cell, false)], ['编辑', 'var(--blue)', null], ['删除', 'var(--red)', null]];
+    btns.innerHTML = '';
+    items.forEach(([label, color, fn], i) => {
+      const b = document.createElement('div');
+      b.textContent = label;
+      b.style.cssText = `text-align:center;padding:14px;font-size:16px;color:${color};cursor:pointer${i ? ';border-top:1px solid var(--sep)' : ''}`;
+      b.onclick = () => { closeSheet(); if (fn) fn(); };
+      btns.appendChild(b);
+    });
+    sheet.style.display = 'block';
+    requestAnimationFrame(() => { mask.style.opacity = 1; panel.style.transform = 'none'; });
+  }
+  function closeSheet() {
+    mask.style.opacity = 0;
+    panel.style.transform = 'translateY(110%)';
+    setTimeout(() => (sheet.style.display = 'none'), 200);
+  }
+  function fakeConsume(cell, restore) {
+    const pill = cell.querySelector('.pill');
+    pill.textContent = restore ? '剩 50 天' : '已吃完';
+    if (restore) { pill.style.background = ''; pill.classList.add('green'); }
+    else { pill.style.background = 'var(--swipe-more)'; pill.classList.remove('orange', 'green'); }
+  }
+  mask.onclick = closeSheet;
+  sheet.querySelector('.sheet-cancel').onclick = closeSheet;
+
+  // 点击条目弹出（拖拽过的点击不算）
+  document.querySelectorAll('.cell .row').forEach(row => {
+    row.addEventListener('click', () => {
+      if (window.__justDragged) { window.__justDragged = false; return; }
+      openSheet(row.closest('.cell'));
+    });
+  });
+</script>
+</body>
+</html>

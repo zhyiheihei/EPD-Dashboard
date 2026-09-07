@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>食管家 · 墨水屏</title>
+<style>
+  :root {
+    --bg: #ededed; --nav: #f7f7f7; --cell: #ffffff;
+    --text: #191919; --text-2: #888888; --sep: rgba(0,0,0,.06);
+    --accent: #07c160; --red: #fa5151; --orange: #ff9900; --blue: #576b95;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111111; --nav: #191919; --cell: #191919;
+      --text: #e8e8e8; --text-2: #7d7d7d; --sep: rgba(255,255,255,.07);
+      --blue: #7d90b8;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
+    max-width: 520px; margin: 0 auto; display: flex; flex-direction: column;
+    -webkit-font-smoothing: antialiased; overflow: hidden;
+  }
+  .navbar {
+    background: var(--nav); padding: env(safe-area-inset-top) 16px 0;
+    border-bottom: 1px solid var(--sep); flex: none;
+  }
+  .navbar .bar { display: flex; align-items: center; height: 52px; }
+  .navbar h1 { font-size: 17px; font-weight: 600; flex: 1; }
+
+  .page { flex: 1; overflow-y: auto; padding-bottom: 20px; }
+  .group-title { color: var(--text-2); font-size: 12.5px; padding: 14px 16px 7px; }
+  .cell { background: var(--cell); position: relative; }
+  .cell .row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+  .cell .info { flex: 1; min-width: 0; }
+  .cell .name { font-size: 16px; font-weight: 500; }
+  .cell .sub { color: var(--text-2); font-size: 13px; margin-top: 3px; }
+  .cell .val { color: var(--text-2); font-size: 13px; }
+  .sep { height: 1px; background: var(--sep); margin-left: 16px; }
+
+  .preview-wrap { background: var(--cell); padding: 14px 16px 16px; }
+  .preview {
+    width: 100%; border-radius: 10px; border: 1px solid var(--sep);
+    background: #fff; display: block;
+  }
+  .preview-note { color: var(--text-2); font-size: 12px; margin-top: 8px; display: flex; justify-content: space-between; }
+  .pill {
+    display: inline-block; font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 5px; min-width: 34px; text-align: center;
+    color: #fff; background: var(--accent); margin-left: 8px; vertical-align: 1px;
+  }
+  .pill.busy { background: var(--orange); }
+
+  .actions-bar { display: flex; gap: 10px; padding: 14px 16px 4px; }
+  .big-btn {
+    flex: 1; border: none; border-radius: 12px; padding: 13px 0;
+    font-size: 15px; font-weight: 600; cursor: pointer;
+    background: var(--accent); color: #fff;
+  }
+  .big-btn.secondary { background: var(--cell); color: var(--blue); border: 1px solid var(--sep); }
+  .log {
+    background: var(--cell); margin: 14px 16px 0; border-radius: 12px; padding: 12px 14px;
+    font-size: 12px; color: var(--text-2); line-height: 1.9;
+  }
+  .log b { color: var(--text); font-weight: 500; }
+  .ok { color: var(--accent); }
+  .tabbar {
+    flex: none; background: var(--nav); border-top: 1px solid var(--sep);
+    display: flex; padding: 6px 0 env(safe-area-inset-bottom);
+  }
+  .tab { flex: 1; text-align: center; color: var(--text-2); font-size: 11px; padding: 3px 0; cursor: pointer; }
+  .tab .ic { font-size: 22px; display: block; }
+  .tab.on { color: var(--accent); }
+</style>
+</head>
+<body>
+  <div class="navbar"><div class="bar"><h1>墨水屏</h1></div></div>
+
+  <div class="page">
+    <div class="group-title">屏幕内容预览 · 实时</div>
+    <div class="preview-wrap">
+      <img class="preview" src="dash-preview.png" alt="墨水屏预览">
+      <div class="preview-note">
+        <span>800×480 · 7.5 寸三色</span>
+        <span>上次同步 <b style="color:var(--text)">2 分钟前</b></span>
+      </div>
+    </div>
+
+    <div class="actions-bar">
+      <button class="big-btn">立即刷新墨水屏</button>
+      <button class="big-btn secondary">仅推送数据</button>
+    </div>
+
+    <div class="group-title">最近推送</div>
+    <div class="cell">
+      <div class="row">
+        <div class="info">
+          <div class="name">手动刷新 <span class="pill ok">成功</span></div>
+          <div class="sub">4 条食品 · 耗时 28.4s · 19:10</div>
+        </div>
+        <span class="val">局部刷新</span>
+      </div>
+      <div class="sep"></div>
+    </div>
+    <div class="cell">
+      <div class="row">
+        <div class="info">
+          <div class="name">数据变更自动推送 <span class="pill ok">成功</span></div>
+          <div class="sub">3 条食品 · 耗时 35.2s · 19:09</div>
+        </div>
+        <span class="val">全刷</span>
+      </div>
+      <div class="sep"></div>
+    </div>
+    <div class="cell">
+      <div class="row">
+        <div class="info">
+          <div class="name">0 点定时推送 <span class="pill">进行中</span></div>
+          <div class="sub">开始于 00:00 · 设备 NRF_EPD_3E1C</div>
+        </div>
+      </div>
+      <div class="sep"></div>
+    </div>
+
+    <div class="group-title">设备</div>
+    <div class="cell">
+      <div class="row"><div class="info"><div class="name">NRF_EPD_3E1C</div><div class="sub">固件 v0x24 · 电量估算 87% · RSSI -58dBm</div></div><span class="val">在线</span></div>
+      <div class="sep"></div>
+    </div>
+    <div class="cell">
+      <div class="row"><div class="info"><div class="name">刷新策略</div><div class="sub">每天 0 点全刷 1 次；数据变更仅更新设备内存，次日生效</div></div></div>
+      <div class="sep"></div>
+    </div>
+  </div>
+
+  <div class="tabbar">
+    <div class="tab"><span class="ic">🏠</span>库存</div>
+    <div class="tab on"><span class="ic">📺</span>墨水屏</div>
+    <div class="tab"><span class="ic">⬆️</span>固件</div>
+    <div class="tab"><span class="ic">⚙️</span>设置</div>
+  </div>
+</body>
+</html>

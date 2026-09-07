@@ -69,6 +69,7 @@ class Config:
     push_debounce: float
     full_refresh_every: int  # 每 N 次推送强制全刷清残影；0 = 始终全刷
     commit_sleep: bool  # COMMIT 是否带 SLEEP 标志（调试局部刷新时关闭）
+    change_min_interval: float  # 变更推送最小间隔（秒）：墨水屏刷新寿命有限
     state_dir: Path
 
     @property
@@ -99,6 +100,7 @@ class Config:
             retry_backoff=_env_float("RETRY_BACKOFF", 3.0),
             push_on_change=_env_bool("PUSH_ON_CHANGE", True),
             push_debounce=_env_float("PUSH_DEBOUNCE", 10.0),
+            change_min_interval=_env_float("CHANGE_MIN_INTERVAL", 1800.0),
             full_refresh_every=_env_int("FULL_REFRESH_EVERY", 8),
             commit_sleep=_env_bool("COMMIT_SLEEP", True),
             state_dir=Path(_env("STATE_DIR") or default_state_dir()),

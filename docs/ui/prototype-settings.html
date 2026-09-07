@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>食管家 · 设置</title>
+<style>
+  :root {
+    --bg: #ededed; --nav: #f7f7f7; --cell: #ffffff;
+    --text: #191919; --text-2: #888888; --sep: rgba(0,0,0,.06);
+    --accent: #07c160; --red: #fa5151; --orange: #ff9900; --blue: #576b95;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111111; --nav: #191919; --cell: #191919;
+      --text: #e8e8e8; --text-2: #7d7d7d; --sep: rgba(255,255,255,.07);
+      --blue: #7d90b8;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
+    max-width: 520px; margin: 0 auto; display: flex; flex-direction: column;
+    -webkit-font-smoothing: antialiased; overflow: hidden;
+  }
+  .navbar { background: var(--nav); padding: env(safe-area-inset-top) 16px 0; border-bottom: 1px solid var(--sep); flex: none; }
+  .navbar .bar { display: flex; align-items: center; height: 52px; }
+  .navbar h1 { font-size: 17px; font-weight: 600; }
+
+  .page { flex: 1; overflow-y: auto; padding-bottom: 20px; }
+  .group-title { color: var(--text-2); font-size: 12.5px; padding: 14px 16px 7px; }
+  .cell { background: var(--cell); position: relative; }
+  .cell .row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; }
+  .cell .info { flex: 1; min-width: 0; }
+  .cell .name { font-size: 15.5px; }
+  .cell .sub { color: var(--text-2); font-size: 12.5px; margin-top: 3px; line-height: 1.5; }
+  .cell .val { color: var(--text-2); font-size: 13.5px; }
+  .sep { height: 1px; background: var(--sep); margin-left: 16px; }
+  .toggle {
+    width: 50px; height: 30px; border-radius: 15px; background: var(--accent);
+    position: relative; flex: none; cursor: pointer;
+  }
+  .toggle::after {
+    content: ""; position: absolute; top: 2px; right: 2px; width: 26px; height: 26px;
+    border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25);
+  }
+  .toggle.off { background: var(--sep); }
+  .toggle.off::after { right: auto; left: 2px; }
+  .stepper {
+    display: flex; align-items: center; gap: 0; border: 1px solid var(--sep);
+    border-radius: 8px; overflow: hidden; flex: none;
+  }
+  .stepper button {
+    border: none; background: var(--bg); width: 34px; height: 32px; font-size: 17px;
+    color: var(--text); cursor: pointer;
+  }
+  .stepper span { width: 42px; text-align: center; font-size: 15px; font-weight: 500; }
+  .input {
+    width: 180px; border: 1px solid var(--sep); background: var(--bg); border-radius: 8px;
+    padding: 8px 10px; font-size: 13px; color: var(--text); text-align: right;
+  }
+  .danger-zone { margin: 16px; }
+  .danger-btn {
+    width: 100%; border: none; border-radius: 12px; padding: 13px 0; font-size: 15px;
+    font-weight: 500; background: var(--cell); color: var(--red); cursor: pointer;
+  }
+  .foot { color: var(--text-2); font-size: 12px; text-align: center; padding: 18px 0 6px; line-height: 1.8; }
+  .tabbar {
+    flex: none; background: var(--nav); border-top: 1px solid var(--sep);
+    display: flex; padding: 6px 0 env(safe-area-inset-bottom);
+  }
+  .tab { flex: 1; text-align: center; color: var(--text-2); font-size: 11px; padding: 3px 0; cursor: pointer; }
+  .tab .ic { font-size: 22px; display: block; }
+  .tab.on { color: var(--accent); }
+</style>
+</head>
+<body>
+  <div class="navbar"><div class="bar"><h1>设置</h1></div></div>
+
+  <div class="page">
+    <div class="group-title">服务连接</div>
+    <div class="cell">
+      <div class="row"><div class="info"><div class="name">服务地址</div></div><span class="val">192.168.1.20:18313</span></div>
+      <div class="sep"></div>
+    </div>
+    <div class="cell">
+      <div class="row"><div class="info"><div class="name">访问令牌</div><div class="sub">用于 WebUI 与 API 鉴权，留空则本机免鉴权</div></div><span class="val">••••••••</span></div>
+      <div class="sep"></div>
+    </div>
+
+    <div class="group-title">推送策略</div>
+    <div class="cell">
+      <div class="row">
+        <div class="info"><div class="name">每天 0 点定时全刷</div><div class="sub">全刷负责日期/倒计时更新与残影清理（每天仅此 1 次全屏刷新）</div></div>
+        <div class="toggle"></div>
+      </div>
+      <div class="sep"></div>
+    </div>
+    <div class="cell">
+      <div class="row">
+        <div class="info"><div class="name">变更即时上屏</div><div class="sub">录入/吃完后立即局部刷新食品栏；关闭则次日 0 点生效</div></div>
+        <div class="toggle"></div>
+      </div>
+      <div class="sep"></div>
+    </div>
+    <div class="cell">
+      <div class="row">
+        <div class="info"><div class="name">周期性强制全刷</div><div class="sub">每 N 次推送额外全刷一次清残影，0 = 关闭（已有每日全刷兜底）</div></div>
+        <div class="stepper"><button>−</button><span>8</span><button>＋</button></div>
+      </div>
+      <div class="sep"></div>
+    </div>
+    <div class="cell">
+      <div class="row">
+        <div class="info"><div class="name">显示时区</div></div>
+        <span class="val">Asia/Shanghai (UTC+8)</span>
+      </div>
+      <div class="sep"></div>
+    </div>
+
+    <div class="group-title">临期提醒阈值</div>
+    <div class="cell">
+      <div class="row">
+        <div class="info"><div class="name">红色警示</div><div class="sub">剩余 ≤ 此天数标红（默认 2 天）</div></div>
+        <div class="stepper"><button>−</button><span>2</span><button>＋</button></div>
+      </div>
+      <div class="sep"></div>
+    </div>
+    <div class="cell">
+      <div class="row">
+        <div class="info"><div class="name">橙色预警</div><div class="sub">剩余 ≤ 此天数标橙（默认 7 天）</div></div>
+        <div class="stepper"><button>−</button><span>7</span><button>＋</button></div>
+      </div>
+      <div class="sep"></div>
+    </div>
+
+    <div class="group-title">维护</div>
+    <div class="danger-zone">
+      <button class="danger-btn">清空全部数据（重新导入）</button>
+    </div>
+    <p class="foot">食管家 WebUI v0.1 · 服务端 epd-food-server<br>墨水屏 NRF_EPD_3E1C · 固件 v0x24</p>
+  </div>
+
+  <div class="tabbar">
+    <div class="tab"><span class="ic">🏠</span>库存</div>
+    <div class="tab"><span class="ic">📺</span>墨水屏</div>
+    <div class="tab"><span class="ic">⬆️</span>固件</div>
+    <div class="tab on"><span class="ic">⚙️</span>设置</div>
+  </div>
+</body>
+</html>

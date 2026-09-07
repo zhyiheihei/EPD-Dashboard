@@ -112,3 +112,54 @@ def test_commit_flags_partial_every_two():
     caps = make_caps(0x007F)
     assert pusher._commit_flags(caps) & COMMIT_PARTIAL
     assert not pusher._commit_flags(caps) & COMMIT_PARTIAL
+
+# ---------- 变更推送节流（CHANGE_MIN_INTERVAL） ----------
+
+def make_throttle_pusher(min_interval, ok=None, pushed_just_now=False):
+    import json as _json
+    import os as _os
+    import tempfile as _tempfile
+    import time as _time
+    pusher = object.__new__(Pusher)
+    pusher._debounce_task = None
+    pusher._pending_change = False
+    state = Path(_tempfile.mkdtemp())
+    pusher._cfg = type("Cfg", (), {
+        "push_on_change": True, "push_debounce": 0,
+        "change_min_interval": min_interval, "state_dir": state,
+        "status_path": state / "push-status.json",
+    })()
+    if ok is not None:
+        pusher._cfg.status_path.write_text(_json.dumps({"ok": ok}))
+        if pushed_just_now:
+            _os.utime(pusher._cfg.status_path, (_time.time(), _time.time()))
+    return pusher
+
+
+def test_throttle_first_change_schedules():
+    import asyncio
+    pusher = make_throttle_pusher(1800)
+    assert asyncio.run(_sched(pusher)) is True
+
+
+async def _sched(pusher):
+    return pusher.request_change_push()
+
+
+def test_throttle_recent_success_suppressed():
+    import asyncio
+    pusher = make_throttle_pusher(1800, ok=True, pushed_just_now=True)
+    assert asyncio.run(_sched(pusher)) is False
+    assert pusher._pending_change is True
+
+
+def test_throttle_failed_push_not_throttled():
+    import asyncio
+    pusher = make_throttle_pusher(1800, ok=False, pushed_just_now=True)
+    assert asyncio.run(_sched(pusher)) is True
+
+
+def test_throttle_zero_interval_always_schedules():
+    import asyncio
+    pusher = make_throttle_pusher(0, ok=True, pushed_just_now=True)
+    assert asyncio.run(_sched(pusher)) is True

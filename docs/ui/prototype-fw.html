@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>食管家 · 固件</title>
+<style>
+  :root {
+    --bg: #ededed; --nav: #f7f7f7; --cell: #ffffff;
+    --text: #191919; --text-2: #888888; --sep: rgba(0,0,0,.06);
+    --accent: #07c160; --red: #fa5151; --orange: #ff9900; --blue: #576b95;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111111; --nav: #191919; --cell: #191919;
+      --text: #e8e8e8; --text-2: #7d7d7d; --sep: rgba(255,255,255,.07);
+      --blue: #7d90b8;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
+    max-width: 520px; margin: 0 auto; display: flex; flex-direction: column;
+    -webkit-font-smoothing: antialiased; overflow: hidden;
+  }
+  .navbar { background: var(--nav); padding: env(safe-area-inset-top) 16px 0; border-bottom: 1px solid var(--sep); flex: none; }
+  .navbar .bar { display: flex; align-items: center; height: 52px; }
+  .navbar h1 { font-size: 17px; font-weight: 600; flex: 1; }
+  .navbar .navbtn { color: var(--blue); font-size: 14px; cursor: pointer; }
+
+  .page { flex: 1; overflow-y: auto; padding-bottom: 20px; }
+  .group-title { color: var(--text-2); font-size: 12.5px; padding: 14px 16px 7px; }
+  .cell { background: var(--cell); position: relative; }
+  .cell .row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+  .cell .info { flex: 1; min-width: 0; }
+  .cell .name { font-size: 16px; font-weight: 500; }
+  .cell .sub { color: var(--text-2); font-size: 13px; margin-top: 3px; }
+  .cell .val { color: var(--text-2); font-size: 13px; }
+  .sep { height: 1px; background: var(--sep); margin-left: 16px; }
+  .avatar {
+    width: 46px; height: 46px; border-radius: 8px; flex: none;
+    display: flex; align-items: center; justify-content: center; font-size: 20px;
+    background: var(--bg); color: var(--blue); font-weight: 700; font-size: 15px;
+  }
+  .pill {
+    display: inline-block; font-size: 11.5px; font-weight: 600; padding: 2px 9px;
+    border-radius: 5px; color: #fff; background: var(--accent);
+    min-width: 34px; text-align: center; margin-left: 8px; vertical-align: 1px;
+  }
+  .pill.gray { background: var(--text-2); }
+  .pill.orange { background: var(--orange); }
+  .pill.blue { background: var(--blue); }
+
+  .progress-card { background: var(--cell); padding: 14px 16px; }
+  .progress-head { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }
+  .progress-head b { font-weight: 500; }
+  .bar { height: 8px; border-radius: 4px; background: var(--sep); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 68%; background: var(--accent); border-radius: 4px; }
+  .progress-sub { color: var(--text-2); font-size: 12px; margin-top: 7px; }
+
+  .upload {
+    margin: 14px 16px 0; border: 1.5px dashed var(--text-2); border-radius: 12px;
+    padding: 18px; text-align: center; color: var(--text-2); font-size: 14px; background: transparent;
+  }
+  .warn {
+    margin: 14px 16px 0; background: var(--cell); border-radius: 12px; padding: 12px 14px;
+    font-size: 12.5px; color: var(--orange); line-height: 1.7;
+  }
+  .tabbar {
+    flex: none; background: var(--nav); border-top: 1px solid var(--sep);
+    display: flex; padding: 6px 0 env(safe-area-inset-bottom);
+  }
+  .tab { flex: 1; text-align: center; color: var(--text-2); font-size: 11px; padding: 3px 0; cursor: pointer; }
+  .tab .ic { font-size: 22px; display: block; }
+  .tab.on { color: var(--accent); }
+</style>
+</head>
+<body>
+  <div class="navbar"><div class="bar"><h1>固件</h1><span class="navbtn">上传固件包</span></div></div>
+
+  <div class="page">
+    <div class="group-title">当前设备</div>
+    <div class="cell">
+      <div class="row">
+        <div class="avatar">v24</div>
+        <div class="info">
+          <div class="name">NRF_EPD_3E1C <span class="pill">最新</span></div>
+          <div class="sub">nRF52811 · S112 7.3.0 · UC8179 7.5" 三色</div>
+        </div>
+      </div>
+      <div class="sep"></div>
+    </div>
+
+    <div class="group-title">升级进行中</div>
+    <div class="progress-card">
+      <div class="progress-head"><b>v0x24 → v0x25</b><span>68% · 38.9 / 57.2 KB</span></div>
+      <div class="bar"><i></i></div>
+      <div class="progress-sub">Secure DFU 传输中 · 页校验 CRC 通过 · 预计剩余 25s</div>
+    </div>
+
+    <div class="group-title">固件包</div>
+    <div class="cell">
+      <div class="row">
+        <div class="avatar">v25</div>
+        <div class="info">
+          <div class="name">局部刷新优化 <span class="pill blue">可升级</span></div>
+          <div class="sub">57.2 KB · 今天 18:46 · sha256 d5ed…a29d</div>
+        </div>
+        <span class="val">升级</span>
+      </div>
+      <div class="sep"></div>
+    </div>
+    <div class="cell">
+      <div class="row">
+        <div class="avatar">v24</div>
+        <div class="info">
+          <div class="name">午夜自动全刷移除 <span class="pill gray">已安装</span></div>
+          <div class="sub">57.2 KB · 今天 19:05 · sha256 9c21…8e03</div>
+        </div>
+      </div>
+      <div class="sep"></div>
+    </div>
+    <div class="cell">
+      <div class="row">
+        <div class="avatar">v23</div>
+        <div class="info">
+          <div class="name">PT_SCAN 边界修复 <span class="pill gray">历史</span></div>
+          <div class="sub">57.1 KB · 今天 18:52</div>
+        </div>
+        <span class="val" style="color:var(--red)">删除</span>
+      </div>
+      <div class="sep"></div>
+    </div>
+
+    <div class="upload">📦 拖入或点击选择 .zip OTA 包<br><span style="font-size:12px">nrfutil 生成的 Secure DFU 包，自动解析版本号</span></div>
+
+    <div class="warn">⚠️ 升级过程约 90 秒，期间墨水屏会断开广播进入 bootloader（DfuTarg），完成后自动重启并恢复。升级失败时设备会停留在 bootloader，直接重试即可。</div>
+  </div>
+
+  <div class="tabbar">
+    <div class="tab"><span class="ic">🏠</span>库存</div>
+    <div class="tab"><span class="ic">📺</span>墨水屏</div>
+    <div class="tab on"><span class="ic">⬆️</span>固件</div>
+    <div class="tab"><span class="ic">⚙️</span>设置</div>
+  </div>
+</body>
+</html>

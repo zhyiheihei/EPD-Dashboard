@@ -58,6 +58,7 @@ class Pusher:
         self._debounce_task: asyncio.Task | None = None
         self._in_progress = False
         self._push_count = 0
+        self._pending_change = False
 
     @property
     def in_progress(self) -> bool:
@@ -138,13 +139,33 @@ class Pusher:
     # ---------- 防抖（serve 模式） ----------
 
     def request_change_push(self) -> bool:
-        """数据变更后调用；防抖合并连续写入。返回是否已调度。"""
+        """数据变更后调用：防抖合并连续写入 + 节流限制推送频率。
+
+        距上次成功推送不足 change_min_interval 秒则不推（墨水屏刷新寿命有限），
+        变更会记为 pending，在 0 点定时推送或下次节流到期后的变更时一并上屏。
+        """
         if not self._cfg.push_on_change:
+            return False
+        if self._recently_pushed():
+            self._pending_change = True
+            log.info("距上次推送不足 %s 分钟，变更留待下次推送", self._cfg.change_min_interval / 60)
             return False
         if self._debounce_task is not None and not self._debounce_task.done():
             self._debounce_task.cancel()
         self._debounce_task = asyncio.create_task(self._debounced_push(self._cfg.push_debounce))
         return True
+
+    def _recently_pushed(self) -> bool:
+        try:
+            mtime = self._cfg.status_path.stat().st_mtime
+        except OSError:
+            return False
+        ok = False
+        try:
+            ok = json.loads(self._cfg.status_path.read_text(encoding="utf-8")).get("ok") is True
+        except Exception:
+            pass
+        return ok and (time.time() - mtime) < self._cfg.change_min_interval
 
     async def _debounced_push(self, delay: float) -> None:
         try:
