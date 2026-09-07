@@ -1,0 +1,4 @@
+# MCP server 依赖（生产：优先用 flake/nix 提供；本地 venv 时 pip install -r）
+# bleak 必须 <1：3.x API 不兼容（服务端 BLE 推送依赖 0.22 行为）
+bleak<1
+mcp>=2.1

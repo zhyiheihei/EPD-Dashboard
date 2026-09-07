@@ -123,6 +123,12 @@ class EpdSession:
         self._client = BleakClient(device, timeout=self._cfg.connect_timeout)
         try:
             await self._client.connect()
+            # BlueZ 竞态：connect 返回后 GATT 服务可能尚未解析完，直接写会报
+            # "Service Discovery has not been performed yet"；轮询等服务解析
+            for _ in range(50):
+                if self._client.services:
+                    break
+                await asyncio.sleep(0.1)
         except Exception as exc:
             raise DeviceError(f"连接 {self._device_name} 失败: {exc}") from exc
         try:
@@ -200,12 +206,19 @@ class EpdSession:
 
     async def _write(self, payload: bytes) -> None:
         assert self._client is not None
-        try:
-            await self._client.write_gatt_char(
-                protocol.CHARACTERISTIC_UUID, payload, response=True
-            )
-        except Exception as exc:
-            raise DeviceError(f"写入失败（len={len(payload)}）: {exc}") from exc
+        # BlueZ 竞态：连接后首个写入偶发 "Service Discovery has not been
+        # performed yet"（服务已解析但写入路径未就绪），短暂重试即可
+        last_exc: Exception | None = None
+        for _ in range(3):
+            try:
+                await self._client.write_gatt_char(
+                    protocol.CHARACTERISTIC_UUID, payload, response=True
+                )
+                return
+            except Exception as exc:
+                last_exc = exc
+                await asyncio.sleep(0.3)
+        raise DeviceError(f"写入失败（len={len(payload)}）: {last_exc}") from last_exc
 
     # ---------- 协议流程 ----------
 

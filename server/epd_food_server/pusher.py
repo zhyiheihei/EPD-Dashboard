@@ -170,6 +170,11 @@ class Pusher:
     async def _debounced_push(self, delay: float) -> None:
         try:
             await asyncio.sleep(delay)
+            if self._busy.locked():
+                # 已有推送进行中：数据会在那次推送里带上（DB 已是最新），
+                # 或留待下次变更触发，不排队白等锁
+                log.info("推送进行中，防抖推送跳过（数据已含最新变更）")
+                return
             log.info("数据变更防抖到期，自动推送")
             await self.push(reason="change")
         except asyncio.CancelledError:

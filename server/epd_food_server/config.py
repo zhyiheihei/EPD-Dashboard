@@ -97,7 +97,8 @@ class Config:
             max_chunk=_env_int("MAX_CHUNK", 0),
             settle_seconds=_env_float("SETTLE_SECONDS", 16.0),
             push_retries=_env_int("PUSH_RETRIES", 2),
-            retry_backoff=_env_float("RETRY_BACKOFF", 3.0),
+            # 首次失败后设备需重新广播（约 10s+），backoff 太短会连续扫不到设备
+            retry_backoff=_env_float("RETRY_BACKOFF", 12.0),
             push_on_change=_env_bool("PUSH_ON_CHANGE", True),
             push_debounce=_env_float("PUSH_DEBOUNCE", 10.0),
             change_min_interval=_env_float("CHANGE_MIN_INTERVAL", 1800.0),
