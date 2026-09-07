@@ -65,11 +65,39 @@ class Pusher:
 
     # ---------- 状态 ----------
 
-    def _commit_flags(self, caps: protocol.CapsInfo) -> int:
-        """决定本次 COMMIT 是否局部刷新：设备支持且未到全刷周期时使用局部。
+    @property
+    def _last_full_refresh_path(self) -> Path:
+        return self._cfg.state_dir / "last-full-refresh.txt"
 
-        局部刷新不闪屏、耗时短，但残影会累积；设备每日午夜会自动全刷清残影，
-        这里再按 full_refresh_every 周期性强制全刷双保险。
+    def _consume_daily_full_refresh(self) -> bool:
+        """当天首次推送返回 True（需要全刷）。
+
+        固件 v24 起不再午夜自动全刷（会把服务端位图盖掉），日期/倒计时更新、
+        残影清理都依赖每日一次的服务端全刷推送。上次全刷日期持久化在
+        state_dir，服务端重启不重置。
+        """
+        today = datetime.now(timezone.utc).astimezone().date().isoformat()
+        try:
+            last = self._last_full_refresh_path.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            last = ""
+        except Exception as exc:
+            log.warning("上次全刷日期读取失败: %s", exc)
+            last = ""
+        if last == today:
+            return False
+        try:
+            self._cfg.state_dir.mkdir(parents=True, exist_ok=True)
+            self._last_full_refresh_path.write_text(today, encoding="utf-8")
+        except Exception as exc:
+            log.warning("上次全刷日期写入失败: %s", exc)
+        return True
+
+    def _commit_flags(self, caps: protocol.CapsInfo) -> int:
+        """决定本次 COMMIT 是否局部刷新：当天首次或达到周期时全刷，否则局部。
+
+        局部刷新不闪屏、耗时短，但残影会累积；每天首次推送强制全刷，
+        负责日期/倒计时全屏更新与残影清理（固件不再午夜自动刷新）。
         """
         every = self._cfg.full_refresh_every
         flags = protocol.COMMIT_DEFAULT
@@ -78,6 +106,9 @@ class Pusher:
         if not (caps.features & protocol.FEATURE_PARTIAL_REFRESH):
             return flags
         self._push_count += 1
+        if self._consume_daily_full_refresh():
+            log.info("当天首次推送，全刷更新日期与倒计时并清残影")
+            return flags
         if every <= 0:
             return flags
         if self._push_count % every == 0:

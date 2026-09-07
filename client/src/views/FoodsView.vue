@@ -43,6 +43,7 @@ const dialog = reactive({
   productionDate: "",
   amount: 1,
   unit: "日" as "日" | "月" | "年",
+  quantity: 1,
 });
 
 const UNIT_DAYS: Record<string, number> = { 日: 1, 月: 30, 年: 365 };
@@ -60,6 +61,7 @@ function openCreate() {
   dialog.productionDate = new Date().toISOString().slice(0, 10);
   dialog.amount = 1;
   dialog.unit = "日";
+  dialog.quantity = 1;
   dialog.visible = true;
 }
 
@@ -78,6 +80,7 @@ function openEdit(food: Food) {
     dialog.unit = "日";
     dialog.amount = food.shelf_life_days;
   }
+  dialog.quantity = food.quantity;
   dialog.visible = true;
 }
 
@@ -89,7 +92,7 @@ async function submit() {
     category: dialog.category.trim(),
     production_date: dialog.productionDate,
     shelf_life_days: shelfLifeDays,
-    quantity: 1,
+    quantity: dialog.quantity,
   };
   if (dialog.editingId === null) {
     await api.createFood(body);
@@ -169,6 +172,9 @@ onMounted(load);
       <el-table-column label="保质期" width="90">
         <template #default="{ row }">{{ humanShelfLife(row.shelf_life_days) }}</template>
       </el-table-column>
+      <el-table-column label="数量" width="70">
+        <template #default="{ row }">{{ row.quantity }}</template>
+      </el-table-column>
       <el-table-column label="到期日" width="110">
         <template #default="{ row }">{{ formatDate(row.expiry_date) }}</template>
       </el-table-column>
@@ -229,6 +235,9 @@ onMounted(load);
             <el-radio-button value="月">月</el-radio-button>
             <el-radio-button value="年">年</el-radio-button>
           </el-radio-group>
+        </el-form-item>
+        <el-form-item label="数量">
+          <el-input-number v-model="dialog.quantity" :min="1" :max="9999" controls-position="right" />
         </el-form-item>
       </el-form>
       <template #footer>
