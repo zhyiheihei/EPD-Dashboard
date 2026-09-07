@@ -60,11 +60,11 @@ def create_router(auth: Callable) -> APIRouter:
         return {"deleted": True, "id": firmware_id}
 
     @router.get("/ota/device", tags=["ota"])
-    async def device_version(request: Request):
-        """实时连接设备读取当前固件版本。"""
+    async def device_version(request: Request, refresh: bool = False):
+        """当前固件版本（默认走 5 分钟缓存；refresh=1 才真正连接设备）。"""
         cfg = request.app.state.cfg
         try:
-            name, version = await read_app_version(cfg)
+            name, version = await read_app_version(cfg, max_age=0 if refresh else None)
         except DeviceError as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
         return {"device": name, "version": version, "version_hex": f"0x{version:02X}"}

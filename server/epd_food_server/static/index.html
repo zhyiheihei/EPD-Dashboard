@@ -451,6 +451,7 @@
           <div class="name" id="dev-name">—</div>
           <div class="sub" id="dev-info">读取中…</div>
         </div>
+        <span class="val" style="color:var(--blue);cursor:pointer" onclick="apiFetch('/ota/device?refresh=1').then(loadEpd).catch(alertErr)">刷新</span>
         <span class="val" id="dev-online">—</span>
       </div>
       <div class="sep"></div>
@@ -816,7 +817,7 @@
       res.textContent = s.in_progress ? '推送中' : s.ok === null ? '' : s.ok ? '成功' : '失败';
       res.style.color = s.ok === false ? 'var(--red)' : 'var(--accent)';
       document.getElementById('epd-last').textContent = s.finished_at ? fmtTime(s.finished_at) : '—';
-      const dev = await apiFetch('/ota/device').catch(() => null);
+      const dev = await apiFetch('/ota/device').catch(() => null);  // 服务端带缓存，不唤醒设备
       if (dev) {
         document.getElementById('dev-name').textContent = dev.device;
         document.getElementById('dev-info').textContent = `固件 v${dev.version_hex}`;
@@ -858,7 +859,7 @@
       const list = await apiFetch('/ota/firmware');
       document.getElementById('fw-list').innerHTML =
         list.length ? list.map(fwRow).join('') : '<div class="empty-eaten">暂无固件包，从下方上传</div>';
-      const dev = await apiFetch('/ota/device').catch(() => null);
+      const dev = await apiFetch('/ota/device').catch(() => null);  // 服务端带缓存，不唤醒设备
       if (dev) {
         document.getElementById('fw-cur-badge').textContent = 'v' + dev.version_hex.slice(2);
         document.getElementById('fw-cur-name').textContent = dev.device;

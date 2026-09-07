@@ -66,14 +66,24 @@ async def find_app_device(cfg: Config):
     return device
 
 
-async def read_app_version(cfg: Config) -> tuple[str, int]:
-    """连接设备读取固件版本特征（0x62750003，1 字节），用于 OTA 前版本比对。"""
+_version_cache: tuple[float, str, int] | None = None
+VERSION_CACHE_TTL = 300.0  # 版本读取需要 BLE 连接；设备不干活时应保持休眠，缓存 5 分钟
+
+
+async def read_app_version(cfg: Config, max_age: float | None = None) -> tuple[str, int]:
+    """读取固件版本特征（0x62750003，1 字节）；带 TTL 缓存避免反复 BLE 连接唤醒设备。"""
+    global _version_cache
+    ttl = VERSION_CACHE_TTL if max_age is None else max_age
+    if _version_cache is not None and time.monotonic() - _version_cache[0] < ttl:
+        return (_version_cache[1], _version_cache[2])
     device = await find_app_device(cfg)
     client = BleakClient(device, timeout=cfg.connect_timeout)
     try:
         await client.connect()
         data = await client.read_gatt_char(protocol.VERSION_CHARACTERISTIC_UUID)
-        return (device.name or device.address, data[0])
+        result = (device.name or device.address, data[0])
+        _version_cache = (time.monotonic(), *result)
+        return result
     except DeviceError:
         raise
     except Exception as exc:

@@ -83,10 +83,17 @@ def build_app(cfg: Config, db: Database) -> FastAPI:
             "font_path": font,
         }
 
-    # WebUI 静态页面：无鉴权（页面本身无数据，API 另行鉴权）
+    # WebUI 静态页面：无鉴权（页面本身无数据，API 另行鉴权）；
+    # 开发期禁用缓存，改完页面刷新即生效
     if STATIC_DIR.is_dir():
         from fastapi.staticfiles import StaticFiles
 
-        app.mount("/ui", StaticFiles(directory=STATIC_DIR, html=True), name="ui")
+        class NoCacheStaticFiles(StaticFiles):
+            def file_response(self, *args, **kwargs):
+                resp = super().file_response(*args, **kwargs)
+                resp.headers["Cache-Control"] = "no-cache, max-age=0"
+                return resp
+
+        app.mount("/ui", NoCacheStaticFiles(directory=STATIC_DIR, html=True), name="ui")
 
     return app
