@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import fcntl
+import hashlib
 import json
 import logging
 import os
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, time as dtime, timezone
+from datetime import datetime, time as dtime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -17,11 +18,13 @@ from . import protocol, render
 from .ble import DeviceError, EpdSession
 from .config import DRINK_CATEGORY, Config
 from .db import Database
-from .protocol import FoodRecord, ProtocolError
+from .protocol import FoodRecord, ProtocolError, ScheduleRecord
 
 log = logging.getLogger(__name__)
 
 LOCK_WAIT_TIMEOUT = 90.0
+
+WEEKDAY_CN = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
 
 
 @dataclass
@@ -207,11 +210,15 @@ class Pusher:
             rows = self._db.top_for_display(limit=protocol.MAX_FOODS)
             status.items = [row["name"] for row in rows]
             records, bitmaps = self._build_entries(rows)
+            schedules, schedule_bitmaps = self._fetch_schedules()
+            schedule_changed = self._schedules_changed(schedule_bitmaps)
             attempts = 1 + max(0, self._cfg.push_retries)
             last_error: Exception | None = None
             for attempt in range(1, attempts + 1):
                 try:
-                    status.device = self._run_session(records, bitmaps)
+                    status.device = self._run_session(
+                        records, bitmaps, schedules, schedule_bitmaps, schedule_changed
+                    )
                     status.ok = True
                     last_error = None
                     break
@@ -283,7 +290,86 @@ class Pusher:
             )
         return records, bitmaps
 
-    def _run_session(self, foods: list[FoodRecord], bitmaps: list[bytes]) -> str:
+    # ---------- 日程栏（CalDAV 只读） ----------
+
+    def _fetch_schedules(
+        self,
+    ) -> tuple[list[protocol.ScheduleRecord], list[bytes]]:
+        """拉取 CalDAV 日程并渲染标题位图（槽 0x00/0x01，320×20）。
+
+        拉取或解析失败一律降级为无日程，不阻塞食品推送。
+        未配置 CalDAV 也返回空。
+        """
+        if not self._cfg.caldav_enabled:
+            return [], []
+        from .caldav import CalDavClient, CalDavConfig
+
+        zone = ZoneInfo(self._cfg.timezone)
+        now = datetime.now(timezone.utc)
+        window_end = now + timedelta(days=self._cfg.schedule_days)
+        try:
+            client = CalDavClient(
+                CalDavConfig(
+                    url=self._cfg.caldav_url,
+                    user=self._cfg.caldav_user,
+                    password=self._cfg.caldav_password,
+                    calendar=self._cfg.caldav_calendar,
+                )
+            )
+            events = client.fetch_events(now, window_end, zone)
+            upcoming = [e for e in events if e.start_utc >= now]
+            upcoming.sort(key=lambda e: e.start_utc)
+        except Exception as exc:
+            log.warning("CalDAV 日程拉取失败，本次推送无日程: %s", exc)
+            return [], []
+
+        schedules: list[protocol.ScheduleRecord] = []
+        bitmaps: list[bytes] = []
+        for index, event in enumerate(upcoming[: protocol.MAX_SCHEDULES]):
+            schedules.append(
+                protocol.ScheduleRecord(
+                    slot=index, start_utc=int(event.start_utc.timestamp())
+                )
+            )
+            # 标题带上开始时间（如 “周五 周会”），纯标题无法区分远近日程
+            local_start = event.start_utc.astimezone(zone)
+            label = f"{WEEKDAY_CN[local_start.weekday()]} {event.summary}"
+            bitmaps.append(
+                render.render_text_1bit(
+                    label,
+                    protocol.SCHEDULE_BITMAP_WIDTH,
+                    protocol.SCHEDULE_BITMAP_HEIGHT,
+                    self._font,
+                )
+            )
+        return schedules, bitmaps
+
+    def _schedules_changed(self, bitmaps: list[bytes]) -> bool:
+        """日程位图指纹与上次不同返回 True（日程变化需要全刷才能上屏）。"""
+        fingerprint = hashlib.sha256(b"".join(bitmaps)).hexdigest()[:16]
+        path = self._cfg.state_dir / "last-schedules.txt"
+        try:
+            last = path.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            last = ""
+        except Exception as exc:
+            log.warning("日程指纹读取失败: %s", exc)
+            last = ""
+        try:
+            self._cfg.state_dir.mkdir(parents=True, exist_ok=True)
+            path.write_text(fingerprint, encoding="utf-8")
+        except Exception as exc:
+            log.warning("日程指纹写入失败: %s", exc)
+        return last != fingerprint
+
+    def _run_session(
+        self,
+        foods: list[FoodRecord],
+        bitmaps: list[bytes],
+        schedules: list[ScheduleRecord],
+        schedule_bitmaps: list[bytes],
+        force_full_refresh: bool,
+    ) -> str:
         zone = ZoneInfo(self._cfg.timezone)
         now_utc = int(time.time())
         tz_minutes = int(datetime.now(zone).utcoffset().total_seconds() // 60)
@@ -294,12 +380,17 @@ class Pusher:
                 if caps.max_foods < len(foods):
                     log.warning("设备食品上限 %s 少于待发送 %s 条", caps.max_foods, len(foods))
                 flags = self._commit_flags(caps)
+                if force_full_refresh and (flags & protocol.COMMIT_PARTIAL):
+                    log.info("日程变化，本次强制全刷")
+                    flags &= ~protocol.COMMIT_PARTIAL
                 partial = bool(flags & protocol.COMMIT_PARTIAL)
                 await session.push_foods(
                     foods[: caps.max_foods],
                     bitmaps[: caps.max_foods],
                     now_utc,
                     tz_minutes,
+                    schedules=schedules[: min(protocol.MAX_SCHEDULES, caps.max_schedules)],
+                    schedule_bitmaps=schedule_bitmaps,
                     commit_flags=flags,
                 )
                 # 局部刷新仅刷新 ~1-2s，无需等全刷的 16s

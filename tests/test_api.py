@@ -199,6 +199,11 @@ def make_app(db=None, token: str = TOKEN):
         commit_sleep=True,
         full_refresh_every=8,
         state_dir=Path(tempfile.mkdtemp(prefix="epd-food-test-")),
+        caldav_url="",
+        caldav_user="",
+        caldav_password="",
+        caldav_calendar="",
+        schedule_days=7,
     )
     app = build_app(cfg, db or FakeDB())
     app.state.pusher = FakePusher()

@@ -71,6 +71,12 @@ class Config:
     commit_sleep: bool  # COMMIT 是否带 SLEEP 标志（调试局部刷新时关闭）
     change_min_interval: float  # 变更推送最小间隔（秒）：墨水屏刷新寿命有限
     state_dir: Path
+    # 日程栏（标准 CalDAV 只读）
+    caldav_url: str
+    caldav_user: str
+    caldav_password: str
+    caldav_calendar: str  # 日历集合路径；空 = PROPFIND 自动发现
+    schedule_days: int  # 向后取几天的日程
 
     @property
     def lock_path(self) -> Path:
@@ -79,6 +85,10 @@ class Config:
     @property
     def status_path(self) -> Path:
         return self.state_dir / "push-status.json"
+
+    @property
+    def caldav_enabled(self) -> bool:
+        return bool(self.caldav_url)
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -105,6 +115,11 @@ class Config:
             full_refresh_every=_env_int("FULL_REFRESH_EVERY", 8),
             commit_sleep=_env_bool("COMMIT_SLEEP", True),
             state_dir=Path(_env("STATE_DIR") or default_state_dir()),
+            caldav_url=_env("CALDAV_URL", "") or "",
+            caldav_user=_env("CALDAV_USER", "") or "",
+            caldav_password=_env("CALDAV_PASSWORD", "") or "",
+            caldav_calendar=_env("CALDAV_CALENDAR", "") or "",
+            schedule_days=_env_int("SCHEDULE_DAYS", 7),
         )
 
 

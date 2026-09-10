@@ -256,16 +256,25 @@ class EpdSession:
         now_utc: int,
         timezone_minutes: int,
         schedules: list[ScheduleRecord] | None = None,
+        schedule_bitmaps: list[bytes] | None = None,
         week_start: int = 1,
         bitmap_size: tuple[int, int] = (
             protocol.FOOD_BITMAP_WIDTH,
             protocol.FOOD_BITMAP_HEIGHT,
         ),
+        schedule_bitmap_size: tuple[int, int] = (
+            protocol.SCHEDULE_BITMAP_WIDTH,
+            protocol.SCHEDULE_BITMAP_HEIGHT,
+        ),
         commit_flags: int = protocol.COMMIT_DEFAULT,
     ) -> None:
-        """BEGIN → 逐资源 BITMAP（串行，末片等 42 OK）→ COMMIT(03)。"""
+        """BEGIN → 逐资源 BITMAP（日程标题 0x00/0x01，食品名称 0x10+，末片等 42 OK）→ COMMIT。"""
         if len(foods) != len(bitmaps):
             raise ValueError("foods 与 bitmaps 数量不一致")
+        schedules = schedules or []
+        schedule_bitmaps = schedule_bitmaps or []
+        if len(schedules) != len(schedule_bitmaps):
+            raise ValueError("schedules 与 schedule_bitmaps 数量不一致")
         transaction = random.randint(1, 255)
         begin = protocol.build_begin(
             transaction, now_utc, timezone_minutes, week_start, schedules, foods
@@ -282,18 +291,21 @@ class EpdSession:
                 max_write,
                 self._cfg.max_chunk + protocol.BITMAP_HEADER_LEN + protocol.BITMAP_CRC_LEN,
             )
-        for record, bitmap in zip(foods, bitmaps):
-            asset = protocol.FOOD_SLOT_BASE + record.slot
-            packets = protocol.bitmap_packets(
-                transaction, asset, width, height, bitmap, max_write
-            )
-            self._log(f"发送位图槽位 0x{asset:02X}（{len(bitmap)}B / {len(packets)} 包）")
+
+        async def send_asset(asset: int, data: bytes, size: tuple[int, int]) -> None:
+            packets = protocol.bitmap_packets(transaction, asset, size[0], size[1], data, max_write)
+            self._log(f"发送位图槽位 0x{asset:02X}（{len(data)}B / {len(packets)} 包）")
             for index, packet in enumerate(packets):
                 await self._write(packet)
                 if index == len(packets) - 1:
                     await self._wait_response(
                         protocol.CMD_BITMAP, transaction, self._cfg.session_timeout
                     )
+
+        for record, bitmap in zip(schedules, schedule_bitmaps):
+            await send_asset(record.slot, bitmap, schedule_bitmap_size)
+        for record, bitmap in zip(foods, bitmaps):
+            await send_asset(protocol.FOOD_SLOT_BASE + record.slot, bitmap, bitmap_size)
 
         await self._write(protocol.build_commit(transaction, commit_flags))
         await self._wait_response(
