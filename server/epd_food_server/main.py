@@ -49,12 +49,20 @@ def serve(cfg: Config, db: Database) -> None:
         log.error("数据库不可用（%s），请检查 EPD_FOOD_DSN 与 PostgreSQL 服务", exc)
         raise SystemExit(1) from exc
 
+    _log_serve_banner(cfg)
     uvicorn.run(
         app,
         host=cfg.bind_host,
         port=cfg.bind_port,
         log_level="info",
         access_log=False,
+    )
+
+
+def _log_serve_banner(cfg: Config) -> None:
+    log.info(
+        "epd_food_server %s 启动: %s:%s state=%s",
+        __version__, cfg.bind_host, cfg.bind_port, cfg.state_dir,
     )
 
 

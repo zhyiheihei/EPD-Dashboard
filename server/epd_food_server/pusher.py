@@ -24,6 +24,10 @@ log = logging.getLogger(__name__)
 
 LOCK_WAIT_TIMEOUT = 90.0
 
+# push-history.jsonl 保留的最近推送条数；journal 可能被冲掉，状态文件只存最后一次，
+# 历史落盘在 state_dir 才能事后查「哪次失败、为什么失败」
+PUSH_HISTORY_KEEP = 100
+
 WEEKDAY_CN = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
 
 
@@ -138,6 +142,21 @@ class Pusher:
             _atomic_write_json(self._cfg.status_path, status.to_dict())
         except Exception as exc:
             log.warning("推送状态文件写入失败: %s", exc)
+        self._append_history(status)
+
+    def _append_history(self, status: PushStatus) -> None:
+        path = self._cfg.state_dir / "push-history.jsonl"
+        try:
+            self._cfg.state_dir.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(status.to_dict(), ensure_ascii=False) + "\n")
+            lines = path.read_text(encoding="utf-8").splitlines()
+            if len(lines) > PUSH_HISTORY_KEEP:
+                tmp = path.with_suffix(".tmp")
+                tmp.write_text("\n".join(lines[-PUSH_HISTORY_KEEP:]) + "\n", encoding="utf-8")
+                os.replace(tmp, path)
+        except Exception as exc:
+            log.warning("推送历史写入失败: %s", exc)
 
     # ---------- 防抖（serve 模式） ----------
 

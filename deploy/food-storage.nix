@@ -119,6 +119,16 @@ in
       type = lib.types.str;
       default = "zerossl-zhyi.xin";
     };
+
+    # 本机 journal 被 redroid/Android 的日志洪流（~15 万行/天）冲刷，
+    # 100M 的全局 journal 只能保住约 1~2 小时——夜里的推送失败到早上就查不到了。
+    # 把 epd 服务放进独立 journald 命名空间（journalctl --namespace=epd），
+    # 单独限容量、不参与全局轮转回收。空字符串则退回默认 journal。
+    logNamespace = lib.mkOption {
+      type = lib.types.str;
+      default = "epd";
+      description = "专属 journald 命名空间名；空字符串退回默认 journal";
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -127,6 +137,16 @@ in
       isSystemUser = true;
     };
     users.groups.epd-dashboard = { };
+
+    # 命名空间独立保留策略：容量小、保留久（全局 journal 被灌满得太快）
+    environment.etc."systemd/journald@${cfg.logNamespace}.conf" =
+      lib.mkIf (cfg.logNamespace != "") { text = ''
+        [Journal]
+        Storage=persistent
+        SystemMaxUse=64M
+        MaxRetentionSec=180day
+      '';
+      };
 
     # 数据库：沿用仓库 ensureDatabases 模式； opi5p 已启用 services.postgresql，
     # 其他主机使用本模块前请先启用 PostgreSQL。
@@ -168,6 +188,8 @@ in
         Group = "epd-dashboard";
         StateDirectory = "epd-dashboard";
         WorkingDirectory = "/var/lib/epd-dashboard";
+      } + lib.optionalAttrs (cfg.logNamespace != "") {
+        LogNamespace = cfg.logNamespace;
       };
     };
 
@@ -197,6 +219,8 @@ in
         WorkingDirectory = "/var/lib/epd-dashboard";
         # 物理刷新 + 锁等待，上限放宽
         TimeoutStartSec = "10min";
+      } + lib.optionalAttrs (cfg.logNamespace != "") {
+        LogNamespace = cfg.logNamespace;
       };
     };
 

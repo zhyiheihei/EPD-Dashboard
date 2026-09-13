@@ -236,7 +236,11 @@ def make_schedule_pusher(events: list[CalEvent], fail: bool = False) -> Pusher:
 
 
 def test_pusher_schedules_fetch_and_render():
-    events = [CalEvent(summary="牙医", start_utc=WIN_START + timedelta(days=1, hours=3))]
+    # _fetch_schedules 只保留 start >= now 的事件，窗口必须锚定在当前时刻，
+    # 否则用固定日期的测试会随真实时间流逝而失效（曾被 2026-09-11 炸过）
+    events = [
+        CalEvent(summary="牙医", start_utc=datetime.now(timezone.utc) + timedelta(days=1, hours=3))
+    ]
     pusher = make_schedule_pusher(events)
     schedules, bitmaps = pusher._fetch_schedules()
     assert len(schedules) == 1
@@ -256,7 +260,7 @@ def test_pusher_degrades_on_caldav_failure():
 
 def test_pusher_schedule_fingerprint_triggers_full_refresh():
     pusher = make_schedule_pusher(
-        [CalEvent(summary="牙医", start_utc=WIN_START + timedelta(days=1))]
+        [CalEvent(summary="牙医", start_utc=datetime.now(timezone.utc) + timedelta(days=1))]
     )
     _, bitmaps_first = pusher._fetch_schedules()
     assert pusher._schedules_changed(bitmaps_first) is True  # 首次：无记录
