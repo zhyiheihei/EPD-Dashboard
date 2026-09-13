@@ -203,7 +203,7 @@ def make_app(db=None, token: str = TOKEN):
         caldav_user="",
         caldav_password="",
         caldav_calendar="",
-        schedule_days=7,
+        schedule_horizon_days=365,
     )
     app = build_app(cfg, db or FakeDB())
     app.state.pusher = FakePusher()

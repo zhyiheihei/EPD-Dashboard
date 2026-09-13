@@ -311,12 +311,56 @@ class Pusher:
 
     # ---------- 日程栏（CalDAV 只读） ----------
 
+    @property
+    def _schedule_cache_path(self) -> Path:
+        return self._cfg.state_dir / "schedules-cache.json"
+
+    def _save_schedule_cache(
+        self, schedules: list[ScheduleRecord], bitmaps: list[bytes]
+    ) -> None:
+        """成功拉取后落盘，供下次拉取失败时沿用（避免食品变更推送擦掉日程栏）。"""
+        payload = [
+            {"start_utc": s.start_utc, "bitmap": bitmap.hex()}
+            for s, bitmap in zip(schedules, bitmaps)
+        ]
+        try:
+            self._cfg.state_dir.mkdir(parents=True, exist_ok=True)
+            _atomic_write_json(self._schedule_cache_path, {"schedules": payload})
+        except Exception as exc:
+            log.warning("日程缓存写入失败: %s", exc)
+
+    def _load_schedule_cache(self) -> tuple[list[ScheduleRecord], list[bytes]]:
+        try:
+            data = json.loads(self._schedule_cache_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return [], []
+        except Exception as exc:
+            log.warning("日程缓存读取失败: %s", exc)
+            return [], []
+        schedules: list[ScheduleRecord] = []
+        bitmaps: list[bytes] = []
+        try:
+            for index, item in enumerate(data.get("schedules", [])):
+                schedules.append(
+                    ScheduleRecord(slot=index, start_utc=int(item["start_utc"]))
+                )
+                bitmaps.append(bytes.fromhex(item["bitmap"]))
+        except Exception as exc:
+            log.warning("日程缓存格式异常，忽略: %s", exc)
+            return [], []
+        return schedules, bitmaps
+
     def _fetch_schedules(
         self,
     ) -> tuple[list[protocol.ScheduleRecord], list[bytes]]:
         """拉取 CalDAV 日程并渲染标题位图（槽 0x00/0x01，320×20）。
 
-        拉取或解析失败一律降级为无日程，不阻塞食品推送。
+        展示策略是「最近 N 条」而非「最近 N 天内」：拉取窗口放大到
+        schedule_horizon_days 兜底，按开始时间排序取最近的几条，
+        数月后的长期日程同样能上屏。
+        拉取或解析失败降级沿用上次成功的日程（state_dir 缓存），
+        没有缓存才退化为无日程——避免食品变更推送恰好赶上网络抖动
+        时把屏幕上的日程栏擦掉。
         未配置 CalDAV 也返回空。
         """
         if not self._cfg.caldav_enabled:
@@ -325,7 +369,7 @@ class Pusher:
 
         zone = ZoneInfo(self._cfg.timezone)
         now = datetime.now(timezone.utc)
-        window_end = now + timedelta(days=self._cfg.schedule_days)
+        window_end = now + timedelta(days=self._cfg.schedule_horizon_days)
         try:
             client = CalDavClient(
                 CalDavConfig(
@@ -339,6 +383,10 @@ class Pusher:
             upcoming = [e for e in events if e.start_utc >= now]
             upcoming.sort(key=lambda e: e.start_utc)
         except Exception as exc:
+            cached = self._load_schedule_cache()
+            if cached:
+                log.warning("CalDAV 日程拉取失败，沿用上次日程: %s", exc)
+                return cached
             log.warning("CalDAV 日程拉取失败，本次推送无日程: %s", exc)
             return [], []
 
@@ -361,6 +409,7 @@ class Pusher:
                     self._font,
                 )
             )
+        self._save_schedule_cache(schedules, bitmaps)
         return schedules, bitmaps
 
     def _schedules_changed(self, bitmaps: list[bytes]) -> bool:

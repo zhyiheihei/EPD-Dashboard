@@ -30,9 +30,9 @@ EPD-Dashboard push 到 GitHub → zhyi-packages `nvfetcher -f epd-food-server`�
 标准 RFC 4791 实现（`server/epd_food_server/caldav.py`）：PROPFIND 日历发现 → REPORT calendar-query（time-range）→ 极简 ICS 解析（UTC Z / TZID / VALUE=DATE，DAILY/WEEKLY RRULE 基础展开），纯标准库。
 
 - 生产日历：`https://cal.zhyi.xin`（Radicale），根路径即服务根——日历在 `/zhyi/calendar/`，无 `/dav` 前缀
-- 配置：`EPD_FOOD_CALDAV_URL/USER/PASSWORD/CALENDAR` + `SCHEDULE_DAYS`；密码用全局 sops secret `default-pw`
+- 配置：`EPD_FOOD_CALDAV_URL/USER/PASSWORD/CALENDAR` + `SCHEDULE_HORIZON_DAYS`（拉取窗口天数，默认 365；兼容旧 `SCHEDULE_DAYS`）；密码用全局 sops secret `default-pw`
 - 协议：日程标题位图 320×20（槽 0x00/0x01），BEGIN 帧带 ScheduleRecord（每条 10B）；食品名称 152×20（槽 0x10–0x13）
-- 推送策略：拉日程失败降级为无日程不阻塞；日程位图指纹存 `state_dir/last-schedules.txt`，变化时强制全刷（局部刷新只刷食品面板区）
+- 推送策略：展示「最近 MAX_SCHEDULES 条」事件（按开始时间排序，数月后的长期日程也能上屏），不是「最近 N 天内」；拉日程失败降级沿用上次成功日程（缓存 `state_dir/schedules-cache.json`），无缓存才退化为无日程；日程位图指纹存 `state_dir/last-schedules.txt`，变化时强制全刷（局部刷新只刷食品面板区）
 
 ## 操作红线（血泪教训）
 

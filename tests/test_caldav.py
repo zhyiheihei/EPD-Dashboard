@@ -210,7 +210,7 @@ def make_schedule_pusher(events: list[CalEvent], fail: bool = False) -> Pusher:
             "caldav_password": "pw",
             "caldav_calendar": "calendar",
             "caldav_enabled": True,
-            "schedule_days": 7,
+            "schedule_horizon_days": 365,
             "timezone": "Asia/Shanghai",
             "state_dir": Path(tempfile.mkdtemp(prefix="epd-sched-")),
         },
@@ -250,6 +250,37 @@ def test_pusher_schedules_fetch_and_render():
     assert len(bitmaps[0]) == protocol.SCHEDULE_BITMAP_WIDTH // 8 * protocol.SCHEDULE_BITMAP_HEIGHT
     # 标题应带周几前缀
     assert "周五" in events[0].summary or bitmaps[0]
+
+
+def test_pusher_selects_nearest_two_not_recent_days():
+    """展示策略是最近的 MAX_SCHEDULES 条，而非某个 N 天窗口内的。"""
+    now = datetime.now(timezone.utc)
+    events = [
+        CalEvent(summary="远期会议", start_utc=now + timedelta(days=180)),
+        CalEvent(summary="次近", start_utc=now + timedelta(days=100)),
+        CalEvent(summary="最近", start_utc=now + timedelta(days=90)),
+    ]
+    pusher = make_schedule_pusher(events)
+    schedules, _ = pusher._fetch_schedules()
+    assert [s.start_utc for s in schedules] == [
+        int(events[2].start_utc.timestamp()),
+        int(events[1].start_utc.timestamp()),
+    ]
+
+
+def test_pusher_fetch_failure_reuses_cache():
+    """拉取失败时沿用上次成功日程，避免食品变更推送擦掉日程栏。"""
+    now = datetime.now(timezone.utc)
+    events = [CalEvent(summary="牙医", start_utc=now + timedelta(days=1))]
+    pusher = make_schedule_pusher(events)
+    schedules, bitmaps = pusher._fetch_schedules()  # 成功一次，写入缓存
+    assert schedules
+
+    failing = make_schedule_pusher([], fail=True)
+    failing._cfg.state_dir = pusher._cfg.state_dir
+    cached_schedules, cached_bitmaps = failing._fetch_schedules()
+    assert cached_schedules == schedules
+    assert cached_bitmaps == bitmaps
 
 
 def test_pusher_degrades_on_caldav_failure():

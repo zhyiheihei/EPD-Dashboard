@@ -76,7 +76,7 @@ class Config:
     caldav_user: str
     caldav_password: str
     caldav_calendar: str  # 日历集合路径；空 = PROPFIND 自动发现
-    schedule_days: int  # 向后取几天的日程
+    schedule_horizon_days: int  # 拉取窗口（天）；日程展示的是窗口内最近 N 条，而非最近 N 天内
 
     @property
     def lock_path(self) -> Path:
@@ -119,7 +119,9 @@ class Config:
             caldav_user=_env("CALDAV_USER", "") or "",
             caldav_password=_env("CALDAV_PASSWORD", "") or "",
             caldav_calendar=_env("CALDAV_CALENDAR", "") or "",
-            schedule_days=_env_int("SCHEDULE_DAYS", 7),
+            # 兼容旧变量名 SCHEDULE_DAYS：原语义「向后取几天」，现作拉取窗口兜底
+            schedule_horizon_days=_env_int("SCHEDULE_HORIZON_DAYS")
+            or _env_int("SCHEDULE_DAYS", 365),
         )
 
 
