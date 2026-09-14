@@ -120,8 +120,9 @@ class Config:
             caldav_password=_env("CALDAV_PASSWORD", "") or "",
             caldav_calendar=_env("CALDAV_CALENDAR", "") or "",
             # 兼容旧变量名 SCHEDULE_DAYS：原语义「向后取几天」，现作拉取窗口兜底
-            schedule_horizon_days=_env_int("SCHEDULE_HORIZON_DAYS")
-            or _env_int("SCHEDULE_DAYS", 365),
+            schedule_horizon_days=_env_int(
+                "SCHEDULE_HORIZON_DAYS", _env_int("SCHEDULE_DAYS", 365)
+            ),
         )
 
 
