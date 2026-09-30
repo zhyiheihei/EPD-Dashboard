@@ -197,7 +197,6 @@ def make_app(db=None, token: str = TOKEN):
         push_debounce=0,
         change_min_interval=0,
         commit_sleep=True,
-        full_refresh_every=8,
         state_dir=Path(tempfile.mkdtemp(prefix="epd-food-test-")),
         caldav_url="",
         caldav_user="",

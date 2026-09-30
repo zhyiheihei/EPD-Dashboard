@@ -74,14 +74,19 @@ MTU 244 时单片约 230 字节（Linux/BlueZ 默认可用）；可配置 `EPD_F
 ## 刷新策略（全刷 vs 局部）
 
 固件 v24 起移除了午夜自动全刷（会把服务端位图盖掉），日期/倒计时更新与残影
-清理全部由服务端负责：
+清理全部由服务端负责。更新逻辑（2026-10 重定义）：
 
-- **当天首次推送强制全刷**：上次全刷日期持久化在 `state_dir/last-full-refresh.txt`，
-  服务端重启不重置；
-- 其余推送走**局部刷新**（COMMIT flag `0x04`，需 CAPS 特征位 `1<<6`）：
-  仅刷新食品面板内容区，约 2s、不闪屏；
-- 每 `EPD_FOOD_FULL_REFRESH_EVERY`（默认 8）次推送额外全刷一次清残影，
-  0 = 关闭（已有每日全刷兜底）；
+- **每天 0 点的定时推送是当天首次推送，做一次全刷**：全刷的新数据里自然带上
+  新的倒计时日期与当日日程（日程变化也强制全刷，局部窗口刷不到日程栏）。
+  上次全刷日期持久化在 `state_dir/last-full-refresh.txt`，服务端重启不重置；
+  若 0 点推送失败或错过（服务停机），当天后续第一次成功推送补做全刷；
+- **食品局刷只由手动更新数据触发**（WebUI/客户端/MCP 写库后的变更防抖推送，
+  COMMIT flag `0x04`，需 CAPS 特征位 `1<<6`）：仅刷新食品面板内容区，约 2s
+  不闪屏；变更推送节流 `EPD_FOOD_CHANGE_MIN_INTERVAL`（默认 **300 秒**）；
+- 传输失败保护：推送到设备失败（扫描/连接/协议事务）时，把失败阶段与错误
+  详情落盘 `state_dir/last-failure.json` 并写入 `push-paused.json` 暂停后续
+  自动推送（0 点 timer 与变更推送跳过），避免错误被后续推送日志冲掉；
+  WebUI/API 手动推送或 `epd-food-server push-now --manual` 成功后解除暂停；
 - COMMIT OK 后 settle 等待：全刷 16s（`EPD_FOOD_SETTLE_SECONDS`）、局部 3s，
   等完才释放文件锁。
 
@@ -183,8 +188,7 @@ epd_dashboard_mcp.py   MCP 服务端（stdio，包外单文件）：AI Agent 食
 | `EPD_FOOD_MAX_CHUNK` | 0=按 MTU 自动 | 单片数据字节上限（调试用 6） |
 | `EPD_FOOD_PUSH_ON_CHANGE` | true | 数据变更后防抖即时推送 |
 | `EPD_FOOD_PUSH_DEBOUNCE` | 10 秒 | 合并连续写入 |
-| `EPD_FOOD_CHANGE_MIN_INTERVAL` | 1800 秒 | 变更推送最小间隔（节流）；节流期内的变更留待 0 点或下次变更一并上屏 |
-| `EPD_FOOD_FULL_REFRESH_EVERY` | 8 | 每 N 次推送强制全刷清残影；0 = 关闭（当天首推必全刷） |
+| `EPD_FOOD_CHANGE_MIN_INTERVAL` | 300 秒 | 手动变更后局刷推送最小间隔（节流）；节流期内的变更留待下次变更或次日 0 点一并上屏 |
 | `EPD_FOOD_SETTLE_SECONDS` | 16 | COMMIT OK 后等屏幕物理刷新的时间（局部刷新固定 3s） |
 | `EPD_FOOD_PUSH_RETRIES` / `RETRY_BACKOFF` | 2 / 12 秒 | 推送失败重试次数与退避基数（设备失败后需 ~10s 重新广播，勿设太短） |
 | `EPD_FOOD_COMMIT_SLEEP` | true | COMMIT 是否带休眠标志（调试局部刷新用） |
@@ -198,19 +202,29 @@ epd_dashboard_mcp.py   MCP 服务端（stdio，包外单文件）：AI Agent 食
 state_dir/
 ├── push.lock / ota.lock      flock 互斥（推送 90s、OTA 90s 等待上限）
 ├── push-status.json          最近一次推送结果（/api/epd/status 数据源）
+├── push-history.jsonl        推送历史（含每次失败详情，保留最近 100 条）
+├── push-paused.json          存在 = 传输失败后自动推送已暂停（手动推送成功后删除）
+├── last-failure.json         最近一次未恢复的传输失败详情
+├── schedules-cache.json      上次成功拉取的日程（CalDAV 故障降级用）
 ├── ota-status.json           最近一次 OTA 结果与字节进度
 ├── last-full-refresh.txt     上次全刷日期（当天首推全刷的判定依据）
+├── last-schedules.txt        日程位图指纹（变化 → 下次推送全刷）
 └── ota/                      固件包落盘（文件名带 sha256 前缀）
 ```
 
 ## 推送触发点
 
 1. **每天 0:00** systemd timer `epd-food-push.timer`（Persistent=true，错过后补跑；
-   通常即当天首次推送 → 全刷）
-2. **数据变更**（增/删/改/恢复）：防抖 10s 合并后推送（`EPD_FOOD_PUSH_ON_CHANGE`）；
-   距上次成功推送不足 30 分钟则节流留待下次；已有推送进行中则直接跳过
-   （那次推送已带最新数据）
+   通常即当天首次推送 → 全刷，更新倒计时日期与日程）
+2. **数据变更**（手动增/删/改/恢复）：防抖 10s 合并后局部刷新推送
+   （`EPD_FOOD_PUSH_ON_CHANGE`）；距上次成功推送不足 5 分钟则节流留待下次；
+   已有推送进行中则直接跳过（那次推送已带最新数据）
 3. **手动**：客户端/WebUI 墨水屏页按钮 → `POST /api/epd/push`；
-   或服务器上 `epd-food-server push-now`
+   或服务器上 `epd-food-server push-now --manual`
+
+**传输失败保护**：推送最终失败（重试用尽）时，失败详情落盘
+`state_dir/last-failure.json`，并暂停后续自动推送（0 点 timer 与变更推送跳过，
+状态记录在 `push-paused.json`），避免错误被后续推送的日志冲掉；WebUI/API
+手动推送或 `push-now --manual` 成功后解除暂停。
 
 设备断电/重启后位图丢失（协议 RAM-only），以上任一触发即可重绘。

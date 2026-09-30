@@ -32,7 +32,11 @@ MIN_MTU = 23
 
 
 class DeviceError(RuntimeError):
-    """BLE 层错误（扫描不到设备、连接失败等）。"""
+    """BLE 层错误（扫描不到设备、连接失败等），stage 标记失败阶段。"""
+
+    def __init__(self, message: str, stage: str | None = None):
+        super().__init__(message)
+        self.stage = stage
 
 
 def _match_app_device(cfg: Config):
@@ -59,10 +63,10 @@ async def find_app_device(cfg: Config):
             _match_app_device(cfg), timeout=cfg.scan_timeout
         )
     except Exception as exc:
-        raise DeviceError(f"BLE 扫描失败: {exc}") from exc
+        raise DeviceError(f"BLE 扫描失败: {exc}", stage="scan") from exc
     if device is None:
         hint = (cfg.device_address or "").upper() or f"名称前缀 {cfg.device_name_prefix}"
-        raise DeviceError(f"未找到墨水屏设备（{hint}），请确认设备已上电且在范围内")
+        raise DeviceError(f"未找到墨水屏设备（{hint}），请确认设备已上电且在范围内", stage="scan")
     return device
 
 
@@ -106,6 +110,7 @@ class EpdSession:
         self._queues: dict[int, asyncio.Queue[Response]] = {}
         self._mtu_event: asyncio.Event = asyncio.Event()
         self._on_log = on_log or (lambda msg: None)
+        self._stage: str | None = None  # 当前协议事务阶段，超时错误归因用
 
     # ---------- 生命周期 ----------
 
@@ -130,12 +135,12 @@ class EpdSession:
                     break
                 await asyncio.sleep(0.1)
         except Exception as exc:
-            raise DeviceError(f"连接 {self._device_name} 失败: {exc}") from exc
+            raise DeviceError(f"连接 {self._device_name} 失败: {exc}", stage="connect") from exc
         try:
             await self._client.start_notify(protocol.CHARACTERISTIC_UUID, self._on_notify)
         except Exception as exc:
             await self.close()
-            raise DeviceError(f"订阅通知失败: {exc}") from exc
+            raise DeviceError(f"订阅通知失败: {exc}", stage="connect") from exc
 
     async def close(self) -> None:
         if self._client is not None:
@@ -192,7 +197,8 @@ class EpdSession:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise DeviceError(
-                    f"等待命令 0x{command:02X} 应答超时（tx={transaction}, {timeout:.0f}s）"
+                    f"等待命令 0x{command:02X} 应答超时（tx={transaction}, {timeout:.0f}s）",
+                    stage=self._stage,
                 )
             try:
                 response = await asyncio.wait_for(queue.get(), timeout=remaining)
@@ -218,13 +224,14 @@ class EpdSession:
             except Exception as exc:
                 last_exc = exc
                 await asyncio.sleep(0.3)
-        raise DeviceError(f"写入失败（len={len(payload)}）: {last_exc}") from last_exc
+        raise DeviceError(f"写入失败（len={len(payload)}）: {last_exc}", stage=self._stage) from last_exc
 
     # ---------- 协议流程 ----------
 
     async def handshake(self) -> CapsInfo:
         """INIT（获取 MTU）→ CAPS（校验协议与分辨率）。"""
         await self._write(bytes([protocol.CMD_INIT]))
+        self._stage = "init"
         try:
             await asyncio.wait_for(self._mtu_event.wait(), timeout=5.0)
         except asyncio.TimeoutError:
@@ -233,16 +240,18 @@ class EpdSession:
             self._log(f"未收到设备 MTU 通知，回退 {self._mtu}")
 
         await self._write(protocol.build_caps_request())
+        self._stage = "handshake"
         response = await self._wait_response(
             protocol.CMD_CAPS, transaction=0, timeout=self._cfg.session_timeout
         )
         caps = parse_caps_response(response)
         if caps.protocol != protocol.PROTOCOL_VERSION:
             raise DeviceError(
-                f"协议版本不兼容: 设备最高 0x{caps.protocol:02X}，服务端 0x{protocol.PROTOCOL_VERSION:02X}"
+                f"协议版本不兼容: 设备最高 0x{caps.protocol:02X}，服务端 0x{protocol.PROTOCOL_VERSION:02X}",
+                stage="handshake",
             )
         if caps.width <= 0 or caps.height <= 0:
-            raise DeviceError(f"设备报告的分辨率异常: {caps.width}x{caps.height}")
+            raise DeviceError(f"设备报告的分辨率异常: {caps.width}x{caps.height}", stage="handshake")
         self._log(
             f"CAPS: 固件 0x{caps.firmware:02X} {caps.width}x{caps.height} "
             f"食品上限 {caps.max_foods} 单包 {caps.max_data_len}B"
@@ -268,7 +277,12 @@ class EpdSession:
         ),
         commit_flags: int = protocol.COMMIT_DEFAULT,
     ) -> None:
-        """BEGIN → 逐资源 BITMAP（日程标题 0x00/0x01，食品名称 0x10+，末片等 42 OK）→ COMMIT。"""
+        """BEGIN → 逐资源 BITMAP（日程标题 0x00/0x01，食品名称 0x10+，末片等 42 OK）→ COMMIT。
+
+        传输成功校验：BEGIN/每个位图末片/COMMIT 都必须等到设备 OK 应答，
+        任一环节非 OK、超时或写入失败即视为传输失败——发送 ABORT 清理
+        设备暂存事务后，带着失败阶段标注重抛，由上层决定重试/暂停。
+        """
         if len(foods) != len(bitmaps):
             raise ValueError("foods 与 bitmaps 数量不一致")
         schedules = schedules or []
@@ -276,41 +290,62 @@ class EpdSession:
         if len(schedules) != len(schedule_bitmaps):
             raise ValueError("schedules 与 schedule_bitmaps 数量不一致")
         transaction = random.randint(1, 255)
-        begin = protocol.build_begin(
-            transaction, now_utc, timezone_minutes, week_start, schedules, foods
-        )
-        await self._write(begin)
-        await self._wait_response(
-            protocol.CMD_BEGIN, transaction, self._cfg.session_timeout
-        )
-
-        width, height = bitmap_size
-        max_write = self.max_write
-        if self._cfg.max_chunk > 0:  # 调试/兼容：强制保守分片
-            max_write = min(
-                max_write,
-                self._cfg.max_chunk + protocol.BITMAP_HEADER_LEN + protocol.BITMAP_CRC_LEN,
+        self._stage = stage = "begin"
+        try:
+            begin = protocol.build_begin(
+                transaction, now_utc, timezone_minutes, week_start, schedules, foods
+            )
+            await self._write(begin)
+            await self._wait_response(
+                protocol.CMD_BEGIN, transaction, self._cfg.session_timeout
             )
 
-        async def send_asset(asset: int, data: bytes, size: tuple[int, int]) -> None:
-            packets = protocol.bitmap_packets(transaction, asset, size[0], size[1], data, max_write)
-            self._log(f"发送位图槽位 0x{asset:02X}（{len(data)}B / {len(packets)} 包）")
-            for index, packet in enumerate(packets):
-                await self._write(packet)
-                if index == len(packets) - 1:
-                    await self._wait_response(
-                        protocol.CMD_BITMAP, transaction, self._cfg.session_timeout
-                    )
+            width, height = bitmap_size
+            max_write = self.max_write
+            if self._cfg.max_chunk > 0:  # 调试/兼容：强制保守分片
+                max_write = min(
+                    max_write,
+                    self._cfg.max_chunk + protocol.BITMAP_HEADER_LEN + protocol.BITMAP_CRC_LEN,
+                )
 
-        for record, bitmap in zip(schedules, schedule_bitmaps):
-            await send_asset(record.slot, bitmap, schedule_bitmap_size)
-        for record, bitmap in zip(foods, bitmaps):
-            await send_asset(protocol.FOOD_SLOT_BASE + record.slot, bitmap, bitmap_size)
+            async def send_asset(asset: int, data: bytes, size: tuple[int, int]) -> None:
+                packets = protocol.bitmap_packets(
+                    transaction, asset, size[0], size[1], data, max_write
+                )
+                self._log(f"发送位图槽位 0x{asset:02X}（{len(data)}B / {len(packets)} 包）")
+                for index, packet in enumerate(packets):
+                    await self._write(packet)
+                    if index == len(packets) - 1:
+                        await self._wait_response(
+                            protocol.CMD_BITMAP, transaction, self._cfg.session_timeout
+                        )
 
-        await self._write(protocol.build_commit(transaction, commit_flags))
-        await self._wait_response(
-            protocol.CMD_COMMIT, transaction, self._cfg.session_timeout
-        )
+            for record, bitmap in zip(schedules, schedule_bitmaps):
+                self._stage = stage = f"bitmap 0x{record.slot:02X}"
+                await send_asset(record.slot, bitmap, schedule_bitmap_size)
+            for record, bitmap in zip(foods, bitmaps):
+                self._stage = stage = f"bitmap 0x{protocol.FOOD_SLOT_BASE + record.slot:02X}"
+                await send_asset(protocol.FOOD_SLOT_BASE + record.slot, bitmap, bitmap_size)
+
+            self._stage = stage = "commit"
+            await self._write(protocol.build_commit(transaction, commit_flags))
+            await self._wait_response(
+                protocol.CMD_COMMIT, transaction, self._cfg.session_timeout
+            )
+        except (DeviceError, ProtocolError) as exc:
+            # 协议文档要求：失败/断线/超时后主动 ABORT（若仍可连接），
+            # 清除设备端暂存事务，避免残留状态影响下次推送
+            try:
+                await self.abort(transaction)
+                self._log(f"传输失败已发送 ABORT（stage={stage}）")
+            except Exception:
+                pass
+            raise type(exc)(
+                f"[{stage}] {exc}",
+                status=getattr(exc, "status", None),
+                stage=stage,
+            ) from exc
+        self._stage = None
         if commit_flags & protocol.COMMIT_PARTIAL:
             self._log("COMMIT OK，设备开始局部刷新")
         else:

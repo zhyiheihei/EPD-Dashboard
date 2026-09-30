@@ -30,17 +30,14 @@ def make_caps(features: int) -> protocol.CapsInfo:
     )
 
 
-def make_pusher(full_every: int, daily_full_done: bool = True) -> Pusher:
+def make_pusher(daily_full_done: bool = True) -> Pusher:
     pusher = object.__new__(Pusher)
-    pusher._push_count = 0
     state_dir = Path(tempfile.mkdtemp(prefix="epd-partial-test-"))
     if daily_full_done:
         today = datetime.now(timezone.utc).astimezone().date().isoformat()
         (state_dir / "last-full-refresh.txt").write_text(today, encoding="utf-8")
     pusher._cfg = type(
-        "Cfg",
-        (),
-        {"full_refresh_every": full_every, "commit_sleep": True, "state_dir": state_dir},
+        "Cfg", (), {"commit_sleep": True, "state_dir": state_dir}
     )()
     return pusher
 
@@ -57,61 +54,45 @@ def test_caps_feature_bit6():
 
 
 def test_commit_flags_unsupported_device_always_full():
-    pusher = make_pusher(8)
+    pusher = make_pusher()
     caps = make_caps(0x003F)  # 无局部刷新特征位
-    for _ in range(20):
-        assert pusher._commit_flags(caps) == COMMIT_DEFAULT
+    assert pusher._commit_flags(caps, force_full=False) == COMMIT_DEFAULT
+    assert pusher._commit_flags(caps, force_full=True) == COMMIT_DEFAULT
 
 
-def test_commit_flags_daily_first_push_full_refresh():
-    """当天首次推送必须全刷：固件已去掉午夜自动刷新，全刷由服务端负责。"""
-    pusher = make_pusher(8, daily_full_done=False)
+def test_commit_flags_forced_full_refresh():
+    """每日首推/日程变化 → force_full=True → 全刷；其余局部。"""
+    pusher = make_pusher()
     caps = make_caps(0x007F)
-    assert not pusher._commit_flags(caps) & COMMIT_PARTIAL
-    # 同一天后续推送恢复局部
-    assert pusher._commit_flags(caps) & COMMIT_PARTIAL
-
-
-def test_commit_flags_daily_date_persisted_and_reloaded():
-    """上次全刷日期持久化：新 Pusher 实例（模拟重启）同日不再全刷。"""
-    state_dir = Path(tempfile.mkdtemp(prefix="epd-partial-test-"))
-    today = datetime.now(timezone.utc).astimezone().date().isoformat()
-    pusher_a = object.__new__(Pusher)
-    pusher_a._push_count = 0
-    pusher_a._cfg = type(
-        "Cfg", (), {"full_refresh_every": 8, "commit_sleep": True, "state_dir": state_dir}
-    )()
-    caps = make_caps(0x007F)
-    assert not pusher_a._commit_flags(caps) & COMMIT_PARTIAL  # 无记录 → 全刷
-    pusher_b = object.__new__(Pusher)
-    pusher_b._push_count = 0
-    pusher_b._cfg = pusher_a._cfg
-    assert pusher_b._commit_flags(caps) & COMMIT_PARTIAL  # 已有今日记录 → 局部
-    assert (state_dir / "last-full-refresh.txt").read_text() == today
-
-
-def test_commit_flags_partial_between_full_cycles():
-    pusher = make_pusher(3)
-    caps = make_caps(0x007F)
-    # 第 1、2 次局部，第 3 次全刷，循环
-    assert pusher._commit_flags(caps) & COMMIT_PARTIAL
-    assert pusher._commit_flags(caps) & COMMIT_PARTIAL
-    flags = pusher._commit_flags(caps)
-    assert not flags & COMMIT_PARTIAL
+    assert pusher._commit_flags(caps, force_full=True) == COMMIT_DEFAULT
+    flags = pusher._commit_flags(caps, force_full=False)
+    assert flags & COMMIT_PARTIAL
     assert flags & COMMIT_REFRESH and flags & COMMIT_SLEEP_AFTER
 
 
-def test_commit_flags_full_every_zero():
-    pusher = make_pusher(0)
+def test_commit_flags_commit_sleep_disabled():
+    pusher = make_pusher()
+    pusher._cfg.commit_sleep = False
     caps = make_caps(0x007F)
-    assert pusher._commit_flags(caps) == COMMIT_DEFAULT
+    flags = pusher._commit_flags(caps, force_full=False)
+    assert flags & COMMIT_PARTIAL and not flags & COMMIT_SLEEP_AFTER
+    assert pusher._commit_flags(caps, force_full=True) == COMMIT_REFRESH
 
 
-def test_commit_flags_partial_every_two():
-    pusher = make_pusher(2)
-    caps = make_caps(0x007F)
-    assert pusher._commit_flags(caps) & COMMIT_PARTIAL
-    assert not pusher._commit_flags(caps) & COMMIT_PARTIAL
+def test_daily_full_refresh_pending_and_persisted():
+    """全刷决策只读；标记在推送成功后落盘，重启同日不再全刷。"""
+    pusher = make_pusher(daily_full_done=False)
+    state_dir = pusher._cfg.state_dir
+    assert pusher._daily_full_refresh_pending() is True
+    assert not (state_dir / "last-full-refresh.txt").exists()  # 决策只读不落盘
+    pusher._mark_daily_full_refresh_done()
+    assert pusher._daily_full_refresh_pending() is False
+    today = datetime.now(timezone.utc).astimezone().date().isoformat()
+    assert (state_dir / "last-full-refresh.txt").read_text() == today
+    # 新实例（模拟重启）同日不再全刷
+    pusher_b = object.__new__(Pusher)
+    pusher_b._cfg = pusher._cfg
+    assert pusher_b._daily_full_refresh_pending() is False
 
 # ---------- 变更推送节流（CHANGE_MIN_INTERVAL） ----------
 

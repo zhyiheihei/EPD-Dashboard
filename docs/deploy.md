@@ -90,8 +90,9 @@ curl -s 127.0.0.1:8386/api/health                                               
 | `未找到墨水屏设备` | `bluetoothctl devices` 看广播；`bluetoothctl scan on` 确认 `NRF_EPD_XXXX` 可见；设备上电、在 10m 内；升级中广播名是 DfuTarg，等升级结束 |
 | 推送超时 | `EPD_FOOD_MAX_CHUNK=6` 走保守分片试试（与网页端一致）；缩短设备距离 |
 | 推送成功但屏幕没变 | 全刷约 16s、局部刷新仅刷新食品栏约 2s；`43 OK` 后服务端已按 settle 等待 |
-| 局部刷新后屏幕周围轻微灰边 | 窗口边界电容串扰（物理特性）；平时局部刷新，每天首次推送强制全刷 + 每 8 次推送周期全刷自动清除（固件 v24 起午夜不再自刷，全刷全由服务端负责） |
-| 日期/倒计时没更新 | 依赖每天首次推送的全刷；确认 0 点 timer 有跑（`systemctl list-timers epd-food-push`），或手动 `systemctl start epd-food-push` |
+| 局部刷新后屏幕周围轻微灰边 | 窗口边界电容串扰（物理特性）；平时局刷，每天 0 点定时推送全刷自动清除（固件 v24 起午夜不再自刷，全刷全由服务端负责） |
+| 日期/倒计时没更新 | 依赖每天首次推送的全刷；确认 0 点 timer 有跑（`systemctl list-timers epd-food-push`），或手动 `systemctl start epd-food-push`（当天首推即补全刷） |
+| 自动推送被跳过（日志出现「自动推送已暂停」） | 上次传输失败后保护性暂停；看 `state_dir/last-failure.json` 定位失败阶段，修好后 WebUI 手动推送或 `systemctl start epd-food-push`（默认 timer 语义会被暂停拦截，用 `push-now --manual` 或 WebUI 按钮恢复） |
 | OTA 卡住不动 | 看 `/api/ota/status` 的 error 与进度；设备停在 bootloader 时广播名 DfuTarg，重试升级即可 |
 | BLE 失败、D-Bus 权限 | `sudo -u epd-dashboard dbus-send --system --print-reply --dest=org.bluez / org.freedesktop.DBus.Introspectable.Introspect` |
 | 字体方块 | `ls -l /nix/store/*epd-food-cjk-font*`；journal 里 EPD_FOOD_FONT_PATH 是否存在 |

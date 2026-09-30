@@ -294,11 +294,14 @@ def test_pusher_schedule_fingerprint_triggers_full_refresh():
         [CalEvent(summary="牙医", start_utc=datetime.now(timezone.utc) + timedelta(days=1))]
     )
     _, bitmaps_first = pusher._fetch_schedules()
-    assert pusher._schedules_changed(bitmaps_first) is True  # 首次：无记录
-    assert pusher._schedules_changed(bitmaps_first) is False  # 相同位图
+    # 首次：无记录视为变化；但指纹只在推送成功后落盘（_push_blocking 责任）
+    assert pusher._schedules_fingerprint_changed(bitmaps_first) is True
+    assert not (pusher._cfg.state_dir / "last-schedules.txt").exists()
+    pusher._save_schedules_fingerprint(bitmaps_first)
+    assert pusher._schedules_fingerprint_changed(bitmaps_first) is False  # 相同位图
     _, bitmaps_new = pusher._fetch_schedules()
     # 位图相同则指纹不变
-    assert pusher._schedules_changed(bitmaps_new) is False
+    assert pusher._schedules_fingerprint_changed(bitmaps_new) is False
 
 
 def test_schedule_slots_within_protocol_limits():

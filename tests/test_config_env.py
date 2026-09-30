@@ -19,8 +19,7 @@ def _clean_env(monkeypatch):
 def test_from_env_defaults(monkeypatch):
     cfg = Config.from_env()
     assert cfg.schedule_horizon_days == 365
-    assert cfg.change_min_interval == 1800.0
-    assert cfg.full_refresh_every == 8
+    assert cfg.change_min_interval == 300.0
 
 
 def test_from_env_legacy_schedule_days(monkeypatch):

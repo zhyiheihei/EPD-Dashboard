@@ -66,13 +66,16 @@ def _log_serve_banner(cfg: Config) -> None:
     )
 
 
-def push_now(cfg: Config, db: Database) -> int:
-    """供 systemd timer 调用：直接推送一次，成功返回 0。"""
+def push_now(cfg: Config, db: Database, manual: bool = False) -> int:
+    """供 systemd timer 调用：直接推送一次，成功返回 0。
+
+    --manual 绕过传输失败后的自动推送暂停，成功时同时解除暂停。
+    """
     from .pusher import Pusher
 
     db.ensure_schema()
     pusher = Pusher(cfg, db)
-    status = asyncio.run(pusher.push(reason="timer"))
+    status = asyncio.run(pusher.push(reason="manual" if manual else "timer"))
     if status.ok:
         log.info("推送成功: 设备=%s 条目=%s 耗时=%ss", status.device, status.items, status.duration_s)
         return 0
@@ -114,6 +117,12 @@ def main(argv: list[str] | None = None) -> int:
     serve_parser.add_argument("--host", default=None, help="覆盖 EPD_FOOD_BIND_HOST")
     serve_parser.add_argument("--port", type=int, default=None, help="覆盖 EPD_FOOD_BIND_PORT")
     sub.add_parser("push-now", help="立即向墨水屏推送一次")
+    push_now_parser = sub.choices["push-now"]
+    push_now_parser.add_argument(
+        "--manual",
+        action="store_true",
+        help="按手动推送执行：绕过传输失败后的自动推送暂停，成功时解除暂停",
+    )
     ota_parser = sub.add_parser("ota-push", help="对墨水屏执行固件 OTA 升级")
     ota_parser.add_argument("zip", help="nrfutil 生成的 *-ota.zip 包路径")
     args = parser.parse_args(argv)
@@ -132,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
         serve(cfg, db)
         return 0
     if args.command == "push-now":
-        return push_now(cfg, db)
+        return push_now(cfg, db, manual=args.manual)
     if args.command == "ota-push":
         return ota_push(cfg, db, args.zip)
     parser.error(f"未知命令: {args.command}")

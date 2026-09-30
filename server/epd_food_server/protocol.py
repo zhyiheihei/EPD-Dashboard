@@ -68,9 +68,10 @@ FOOD_TYPE_DRINK = 1
 class ProtocolError(RuntimeError):
     """协议层错误（含设备返回的非 OK 状态码）。"""
 
-    def __init__(self, message: str, status: int | None = None):
+    def __init__(self, message: str, status: int | None = None, stage: str | None = None):
         super().__init__(message)
         self.status = status
+        self.stage = stage
 
 
 def crc16_ccitt(data: bytes) -> int:
