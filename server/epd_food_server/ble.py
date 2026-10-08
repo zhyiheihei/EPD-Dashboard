@@ -1,6 +1,7 @@
-"""bleak BLE 会话：扫描/连接/通知路由/看板协议事务流程。
+"""bleak BLE 会话：连接/通知路由/看板协议事务流程。
 
 服务端为 BLE Central（GATT 客户端），墨水屏为持续广播的外设（无配对加密）。
+设备发现与应用模式版本读取在 discovery.py，固件 DFU 在 dfu.py。
 """
 
 from __future__ import annotations
@@ -11,10 +12,11 @@ import random
 import time
 from typing import Callable
 
-from bleak import BleakClient, BleakScanner
+from bleak import BleakClient
 
 from . import protocol
 from .config import Config
+from .discovery import DeviceError, find_app_device
 from .protocol import (
     CapsInfo,
     FoodRecord,
@@ -30,75 +32,6 @@ log = logging.getLogger(__name__)
 FALLBACK_MTU = 23  # ATT 默认 MTU；收不到固件 mtu= 文本时的兜底
 MIN_MTU = 23
 
-
-class DeviceError(RuntimeError):
-    """BLE 层错误（扫描不到设备、连接失败等），stage 标记失败阶段。"""
-
-    def __init__(self, message: str, stage: str | None = None):
-        super().__init__(message)
-        self.stage = stage
-
-
-def _match_app_device(cfg: Config):
-    """构造应用模式设备过滤器（名称前缀 / 指定地址 / EPD 服务 UUID）。"""
-    want_address = (cfg.device_address or "").replace("-", ":").upper() or None
-
-    def match(device, advertisement) -> bool:
-        if want_address and device.address.upper() == want_address:
-            return True
-        name = device.name or ""
-        if cfg.device_name_prefix and name.startswith(cfg.device_name_prefix):
-            return True
-        uuids = [u.lower() for u in (getattr(advertisement, "service_uuids", None) or [])]
-        return protocol.SERVICE_UUID.lower() in uuids
-
-    return match
-
-
-async def find_app_device(cfg: Config):
-    try:
-        # 不用 BlueZ 的 UUID 发现过滤器（某些 bluetoothd 状态下会报
-        # "No discovery started"），靠广播数据里的名称/UUID 自行匹配。
-        device = await BleakScanner.find_device_by_filter(
-            _match_app_device(cfg), timeout=cfg.scan_timeout
-        )
-    except Exception as exc:
-        raise DeviceError(f"BLE 扫描失败: {exc}", stage="scan") from exc
-    if device is None:
-        hint = (cfg.device_address or "").upper() or f"名称前缀 {cfg.device_name_prefix}"
-        raise DeviceError(f"未找到墨水屏设备（{hint}），请确认设备已上电且在范围内", stage="scan")
-    return device
-
-
-_version_cache: tuple[float, str, int] | None = None
-VERSION_CACHE_TTL = 300.0  # 版本读取需要 BLE 连接；设备不干活时应保持休眠，缓存 5 分钟
-
-
-async def read_app_version(cfg: Config, max_age: float | None = None) -> tuple[str, int]:
-    """读取固件版本特征（0x62750003，1 字节）；带 TTL 缓存避免反复 BLE 连接唤醒设备。"""
-    global _version_cache
-    ttl = VERSION_CACHE_TTL if max_age is None else max_age
-    if _version_cache is not None and time.monotonic() - _version_cache[0] < ttl:
-        return (_version_cache[1], _version_cache[2])
-    device = await find_app_device(cfg)
-    client = BleakClient(device, timeout=cfg.connect_timeout)
-    try:
-        await client.connect()
-        data = await client.read_gatt_char(protocol.VERSION_CHARACTERISTIC_UUID)
-        result = (device.name or device.address, data[0])
-        _version_cache = (time.monotonic(), *result)
-        return result
-    except DeviceError:
-        raise
-    except Exception as exc:
-        raise DeviceError(f"读取固件版本失败: {exc}") from exc
-    finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
-
-
 class EpdSession:
     """一次到墨水屏的完整会话。用法：`async with EpdSession(cfg) as session:`"""
 
@@ -111,6 +44,7 @@ class EpdSession:
         self._mtu_event: asyncio.Event = asyncio.Event()
         self._on_log = on_log or (lambda msg: None)
         self._stage: str | None = None  # 当前协议事务阶段，超时错误归因用
+        self._device_status: dict | None = None  # 连接时读到的诊断状态块（v0x28+）
 
     # ---------- 生命周期 ----------
 
@@ -141,6 +75,35 @@ class EpdSession:
         except Exception as exc:
             await self.close()
             raise DeviceError(f"订阅通知失败: {exc}", stage="connect") from exc
+        # 诊断状态块（固件 v0x28+）：连接后读一次记录到日志与推送状态。
+        # 旧固件不识别 0x46 命令、无应答，超时即跳过，不视为推送失败。
+        self._device_status = await self.read_device_status()
+        if self._device_status:
+            st = self._device_status
+            self._log(
+                f"设备状态: fw=0x{st['firmware']:02X} boot={st['boot_count']} "
+                f"uptime={st['uptime_s']}s reset={st['reset_reason']}({st['reset_reason_names']}) "
+                f"conns={st['connect_count']} last_disc={st['last_disconnect_reason']}"
+            )
+
+    async def read_device_status(self) -> dict | None:
+        prev_stage = self._stage
+        self._stage = "status"
+        try:
+            await self._write(protocol.build_status_request())
+            response = await self._wait_response(
+                protocol.CMD_STATUS, transaction=0, timeout=5.0
+            )
+            return protocol.parse_status_response(response)
+        except Exception as exc:
+            self._log(f"设备不支持诊断状态块（固件 <v0x28?）: {exc}")
+            return None
+        finally:
+            self._stage = prev_stage
+
+    @property
+    def device_status(self) -> dict | None:
+        return self._device_status
 
     async def close(self) -> None:
         if self._client is not None:

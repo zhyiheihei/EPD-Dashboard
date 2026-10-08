@@ -6,7 +6,7 @@ from typing import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from ..ble import DeviceError, read_app_version
+from ..discovery import DeviceError, read_app_version
 from ..ota import OtaPackageError
 
 __all__ = ["create_router"]

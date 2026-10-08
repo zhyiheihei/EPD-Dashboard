@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, "server")
 
 from epd_food_server import protocol
-from epd_food_server.ble import DeviceError
+from epd_food_server.discovery import DeviceError
 from epd_food_server.pusher import Pusher, PushStatus
 
 
@@ -34,6 +34,7 @@ def make_pusher(state_dir: Path, **extra) -> Pusher:
     pusher._cfg = type("Cfg", (), fields)()
     pusher._busy = asyncio.Lock()
     pusher._in_progress = False
+    pusher._last_device_status = None
     return pusher
 
 
@@ -62,7 +63,7 @@ def test_push_blocking_full_decision_and_persist_on_success(monkeypatch, tmp_pat
 
     def run_session(self, foods, bitmaps, schedules, schedule_bitmaps, force_full):
         seen["force_full"] = force_full
-        return "NRF_EPD_3E1C"
+        return "NRF_EPD_3E1C", None
 
     install_stubs(monkeypatch, pusher, run_session)
     status = asyncio.run(pusher.push(reason="timer"))
@@ -126,7 +127,7 @@ def test_transfer_failure_pauses_automated_pushes(monkeypatch, tmp_path):
     # 手动推送放行，成功后解除暂停并清失败记录
     install_stubs(
         monkeypatch, pusher,
-        lambda *args: "NRF_EPD_3E1C",
+        lambda *args: ("NRF_EPD_3E1C", None),
     )
     resumed = asyncio.run(pusher.push(reason="manual"))
     assert resumed.ok is True
@@ -169,7 +170,7 @@ def test_serve_push_forces_full_refresh(monkeypatch, tmp_path):
 
     def run_session(self, foods, bitmaps, schedules, schedule_bitmaps, force_full):
         seen["force_full"] = force_full
-        return "NRF_EPD_3E1C"
+        return "NRF_EPD_3E1C", None
 
     install_stubs(monkeypatch, pusher, run_session)
     # 先以 timer 全刷并落盘，模拟当天已完成的全刷

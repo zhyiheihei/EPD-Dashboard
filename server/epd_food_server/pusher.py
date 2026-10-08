@@ -39,6 +39,7 @@ class PushStatus:
     stage: str | None = None  # 失败发生的阶段（begin/bitmap/commit/prepare 等）
     device: str | None = None
     items: list[str] = field(default_factory=list)
+    device_status: dict | None = None  # 设备诊断状态块（boot 计数/复位原因等，v0x28+）
     started_at: str | None = None
     finished_at: str | None = None
     duration_s: float | None = None
@@ -66,6 +67,7 @@ class Pusher:
         self._debounce_task: asyncio.Task | None = None
         self._in_progress = False
         self._pending_change = False
+        self._last_device_status: dict | None = None  # 最近一次会话读到的设备诊断状态
 
     @property
     def in_progress(self) -> bool:
@@ -316,7 +318,7 @@ class Pusher:
             last_error: Exception | None = None
             for attempt in range(1, attempts + 1):
                 try:
-                    status.device = self._run_session(
+                    status.device, status.device_status = self._run_session(
                         records, bitmaps, schedules, schedule_bitmaps, need_full
                     )
                     status.ok = True
@@ -324,6 +326,7 @@ class Pusher:
                     break
                 except (DeviceError, ProtocolError) as exc:
                     last_error = exc
+                    status.device_status = self._last_device_status
                     log.warning("第 %s/%s 次推送失败: %s", attempt, attempts, exc)
                     if attempt < attempts:
                         time.sleep(self._cfg.retry_backoff * attempt)
@@ -546,11 +549,12 @@ class Pusher:
         now_utc = int(time.time())
         tz_minutes = int(datetime.now(zone).utcoffset().total_seconds() // 60)
 
-        async def run() -> str:
+        async def run() -> tuple[str, dict | None]:
             async with EpdSession(self._cfg) as session:
                 caps = await session.handshake()
                 if caps.max_foods < len(foods):
                     log.warning("设备食品上限 %s 少于待发送 %s 条", caps.max_foods, len(foods))
+                self._last_device_status = session.device_status
                 flags = self._commit_flags(caps, force_full_refresh)
                 log.info(
                     "本次推送：%s（device=%s）",
@@ -568,6 +572,6 @@ class Pusher:
                 )
                 # 局部刷新仅刷新 ~1-2s，无需等全刷的 16s
                 self._settle(3.0 if flags & protocol.COMMIT_PARTIAL else None)
-                return session.device_name or "unknown"
+                return session.device_name or "unknown", session.device_status
 
         return asyncio.run(run())

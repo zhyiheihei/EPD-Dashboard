@@ -22,6 +22,7 @@ CMD_BITMAP = 0x42
 CMD_COMMIT = 0x43
 CMD_ABORT = 0x44
 CMD_SYNC_TIME = 0x45
+CMD_STATUS = 0x46  # 固件 v0x28+：诊断状态块（boot 计数/复位原因/连接计数）
 CMD_RESPONSE = 0xC0
 
 STATUS_OK = 0x00
@@ -141,6 +142,48 @@ def build_caps_request() -> bytes:
     """请求包必须恰好为 `40 01`。"""
     return bytes([CMD_CAPS, PROTOCOL_VERSION])
 
+
+def build_status_request() -> bytes:
+    """诊断状态请求（固件 v0x28+），恰好为 `46 01`。"""
+    return bytes([CMD_STATUS, PROTOCOL_VERSION])
+
+
+RESET_REASON_NAMES = (
+    (0x00001, "RESETPIN"),
+    (0x00002, "DOG"),
+    (0x00004, "SREQ"),
+    (0x00008, "LOCKUP"),
+    (0x10000, "OFF"),
+    (0x20000, "LPCOMP"),
+    (0x40000, "DIF"),
+)
+
+
+def decode_reset_reason(reason: int) -> str:
+    names = [name for mask, name in RESET_REASON_NAMES if reason & mask]
+    return "|".join(names) if names else "POWER_ON" if reason == 0 else hex(reason)
+
+
+def parse_status_response(resp: Response) -> dict:
+    """诊断状态块 18 字节：app_version | proto | boot_count(16) |
+    uptime_s(32) | resetreas(32) | connect_count(16) |
+    last_disconnect_reason | model_id | display_mode | week_start。"""
+    p = resp.payload
+    if len(p) < 18:
+        raise ProtocolError(f"STATUS 载荷不足 18 字节: {p.hex()}")
+    resetreas = struct.unpack_from(">I", p, 8)[0]
+    return {
+        "firmware": p[0],
+        "boot_count": struct.unpack_from(">H", p, 2)[0],
+        "uptime_s": struct.unpack_from(">I", p, 4)[0],
+        "reset_reason": hex(resetreas),
+        "reset_reason_names": decode_reset_reason(resetreas),
+        "connect_count": struct.unpack_from(">H", p, 12)[0],
+        "last_disconnect_reason": hex(p[14]),
+        "model_id": p[15],
+        "display_mode": p[16],
+        "week_start": p[17],
+    }
 
 def parse_caps_response(resp: Response) -> CapsInfo:
     if len(resp.payload) < 14:
