@@ -169,8 +169,12 @@ def parse_status_response(resp: Response) -> dict:
     uptime_s(32) | resetreas(32) | connect_count(16) | last_disconnect |
     model_id。"""
     p = resp.payload
-    if len(p) < 16:
-        raise ProtocolError(f"STATUS 载荷不足 16 字节: {p.hex()}")
+    # 默认 23B MTU 下应答帧会截到 14B（app_version/proto/boot_count/
+    # uptime/resetreas/connect_count 12 字节 + 若干位）；session 针对
+    # MTU<20 只提示不计失败，MTU>=20 时严格要求全帧 15B+。
+    min_len = 14 if len(p) < 20 else 16
+    if len(p) < min_len:
+        raise ProtocolError(f"STATUS 载荷不足 {min_len} 字节: {p.hex()}")
     resetreas = struct.unpack_from(">I", p, 8)[0]
     return {
         "firmware": p[0],
