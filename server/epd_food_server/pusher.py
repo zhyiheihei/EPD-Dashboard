@@ -552,9 +552,11 @@ class Pusher:
         async def run() -> tuple[str, dict | None]:
             async with EpdSession(self._cfg) as session:
                 caps = await session.handshake()
+                # MTU 协商后再读诊断状态块（v28 设备 16B 应答帧在默认 23B
+                # MTU 下会被截断）
+                self._last_device_status = await session.read_device_status()
                 if caps.max_foods < len(foods):
                     log.warning("设备食品上限 %s 少于待发送 %s 条", caps.max_foods, len(foods))
-                self._last_device_status = session.device_status
                 flags = self._commit_flags(caps, force_full_refresh)
                 log.info(
                     "本次推送：%s（device=%s）",

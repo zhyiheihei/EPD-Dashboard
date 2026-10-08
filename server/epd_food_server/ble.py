@@ -62,12 +62,19 @@ class EpdSession:
         self._client = BleakClient(device, timeout=self._cfg.connect_timeout)
         try:
             await self._client.connect()
-            # BlueZ 竞态：connect 返回后 GATT 服务可能尚未解析完，直接写会报
-            # "Service Discovery has not been performed yet"；轮询等服务解析
-            for _ in range(50):
-                if self._client.services:
+            # bleak v3 connect 返回不代表 GATT 解析完成；此刻写特征会报
+            # "Service Discovery has not been performed yet"。显式触发解析
+            # 并等待完成（get_services 内部阻塞到 Resolved）。
+            last_exc: Exception | None = None
+            for _ in range(10):
+                try:
+                    await self._client.get_services()
                     break
-                await asyncio.sleep(0.1)
+                except Exception as exc:
+                    last_exc = exc
+                    await asyncio.sleep(0.5)
+            if last_exc is not None and not self._client.services:
+                raise last_exc
         except Exception as exc:
             raise DeviceError(f"连接 {self._device_name} 失败: {exc}", stage="connect") from exc
         try:
@@ -75,18 +82,11 @@ class EpdSession:
         except Exception as exc:
             await self.close()
             raise DeviceError(f"订阅通知失败: {exc}", stage="connect") from exc
-        # 诊断状态块（固件 v0x28+）：连接后读一次记录到日志与推送状态。
-        # 旧固件不识别 0x46 命令、无应答，超时即跳过，不视为推送失败。
-        self._device_status = await self.read_device_status()
-        if self._device_status:
-            st = self._device_status
-            self._log(
-                f"设备状态: fw=0x{st['firmware']:02X} boot={st['boot_count']} "
-                f"uptime={st['uptime_s']}s reset={st['reset_reason']}({st['reset_reason_names']}) "
-                f"conns={st['connect_count']} last_disc={st['last_disconnect_reason']}"
-            )
 
     async def read_device_status(self) -> dict | None:
+        """读取诊断状态块；必须在 handshake 之后调用（需要 MTU 协商完成，
+        否则默认 23B MTU 截断应答帧）。"""
+
         prev_stage = self._stage
         self._stage = "status"
         try:
@@ -94,7 +94,14 @@ class EpdSession:
             response = await self._wait_response(
                 protocol.CMD_STATUS, transaction=0, timeout=5.0
             )
-            return protocol.parse_status_response(response)
+            status = protocol.parse_status_response(response)
+            self._log(
+                f"设备状态: fw=0x{status['firmware']:02X} boot={status['boot_count']} "
+                f"uptime={status['uptime_s']}s reset={status['reset_reason']}"
+                f"({status['reset_reason_names']}) "
+                f"conns={status['connect_count']} last_disc={status['last_disconnect_reason']}"
+            )
+            return status
         except Exception as exc:
             self._log(f"设备不支持诊断状态块（固件 <v0x28?）: {exc}")
             return None
