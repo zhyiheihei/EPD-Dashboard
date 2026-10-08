@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from fastapi.responses import RedirectResponse
 
 from ..config import PRESET_CATEGORIES, Config
 from ..db import Database
+from ..pusher import Pusher
 from ..render import find_font
 from . import epd as epd_api
 from . import foods as foods_api
@@ -20,6 +22,7 @@ from . import ota as ota_api
 __all__ = ["build_app", "make_auth_dependency"]
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+log = logging.getLogger(__name__)
 
 
 def make_auth_dependency(cfg: Config):
@@ -39,11 +42,27 @@ def make_auth_dependency(cfg: Config):
     return dependency
 
 
-def build_app(cfg: Config, db: Database) -> FastAPI:
+def build_app(cfg: Config, db: Database, pusher: "Pusher | None" = None) -> FastAPI:
+    # 服务启动全刷：面板 RAM 不随 MCU 复位保留，服务重启后首次推送必须
+    # 全刷，否则之前若设备只剩局部刷新状态，屏幕无法完整复原（用户指示
+    # 2026-10-08：服务重启即触发一次全刷）。端口已监听后才推，不阻塞 API。
+    async def _serve_full_push():
+        await asyncio.sleep(2)
+        try:
+            await pusher.push(reason="serve", force_full=True)
+        except Exception:
+            log.exception("启动全刷推送失败")
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        app.state.loop = asyncio.get_running_loop()
-        yield
+        task = asyncio.create_task(_serve_full_push()) if pusher is not None else None
+        try:
+            app.state.loop = asyncio.get_running_loop()
+            yield
+        finally:
+            if task is not None:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
     app = FastAPI(
         title="EPD Food Dashboard API",

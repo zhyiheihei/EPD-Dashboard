@@ -37,9 +37,10 @@ def serve(cfg: Config, db: Database) -> None:
     from .ota import OtaRunner, OtaStore
     from .pusher import Pusher
 
-    app = build_app(cfg, db)
+    pusher = Pusher(cfg, db)
+    app = build_app(cfg, db, pusher)
     store = OtaStore(cfg, db)
-    app.state.pusher = Pusher(cfg, db)
+    app.state.pusher = pusher
     app.state.ota_store = store
     app.state.ota_runner = OtaRunner(cfg, store)
 

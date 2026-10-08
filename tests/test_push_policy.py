@@ -157,3 +157,40 @@ def test_read_status_includes_paused(monkeypatch, tmp_path):
     assert pusher.read_status().get("paused") is None
     pusher._pause_automated(PushStatus(ok=False, reason="timer", error="x", stage="commit"))
     assert pusher.read_status()["paused"]["stage"] == "commit"
+
+
+def test_serve_push_forces_full_refresh(monkeypatch, tmp_path):
+    """服务启动推送（reason=serve, force_full=True）：当天已全刷仍强制全刷，
+    且非 manual reason 仍受推送暂停约束。"""
+    seen = {}
+    state_dir = tmp_path / "state"
+    pusher = make_pusher(state_dir)
+    pusher._db = FakeDB()
+
+    def run_session(self, foods, bitmaps, schedules, schedule_bitmaps, force_full):
+        seen["force_full"] = force_full
+        return "NRF_EPD_3E1C"
+
+    install_stubs(monkeypatch, pusher, run_session)
+    # 先以 timer 全刷并落盘，模拟当天已完成的全刷
+    assert asyncio.run(pusher.push(reason="timer")).ok is True
+    status = asyncio.run(pusher.push(reason="serve", force_full=True))
+    assert status.ok is True
+    assert seen["force_full"] is True
+
+    # serve 推送不带 force_full 时沿用常规决策（当日已刷 → 局部）
+    status2 = asyncio.run(pusher.push(reason="serve"))
+    assert status2.ok is True
+    assert seen["force_full"] is False
+
+    # serve 处于暂停状态时被拦下（非 manual）
+    install_stubs(
+        monkeypatch, pusher,
+        lambda *args: (_ for _ in ()).throw(DeviceError("COMMIT 超时", stage="commit")),
+    )
+    failed = asyncio.run(pusher.push(reason="timer"))
+    assert failed.ok is False
+    install_stubs(monkeypatch, pusher, run_session)
+    paused = asyncio.run(pusher.push(reason="serve", force_full=True))
+    assert paused.ok is False
+    assert "暂停" in (paused.error or "")

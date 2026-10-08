@@ -247,11 +247,15 @@ class Pusher:
 
     # ---------- 主流程 ----------
 
-    async def push(self, reason: str) -> PushStatus:
+    async def push(self, reason: str, force_full: bool = False) -> PushStatus:
         """执行一次完整推送。API 与 0 点 timer 通过文件锁互斥。
 
-        传输失败后自动推送（timer/change）暂停，直到手动推送成功恢复；
+        传输失败后自动推送（timer/change/serve）暂停，直到手动推送成功恢复；
         reason=manual 不受暂停限制，且成功时清除暂停状态。
+
+        force_full=True 跳过每日全刷/日程变化判断强制全刷（服务启动时的
+        serve 推送用）：面板 RAM 不随 MCU 复位保留，服务重启后首次推送
+        必须全刷才能整个上屏。
         """
         if self._busy.locked():
             return PushStatus(ok=None, reason=reason, error="已有推送在进行中")
@@ -271,7 +275,7 @@ class Pusher:
                 self._write_status(status)
                 return status
         async with self._busy:
-            status = await asyncio.to_thread(self._push_blocking, reason)
+            status = await asyncio.to_thread(self._push_blocking, reason, force_full)
         if status.ok:
             self._resume()
         elif status.ok is False and status.stage not in (None, "prepare", "lock"):
@@ -280,7 +284,7 @@ class Pusher:
             self._pause_automated(status)
         return status
 
-    def _push_blocking(self, reason: str) -> PushStatus:
+    def _push_blocking(self, reason: str, force_full: bool = False) -> PushStatus:
         self._in_progress = True
         started = time.monotonic()
         status = PushStatus(reason=reason, started_at=_iso_now())
@@ -301,8 +305,10 @@ class Pusher:
             # 全刷决策在尝试前定死：失败重试沿用同一决策，成功后才落盘指纹，
             # 否则失败过的日程变化/每日全刷会被静默跳过
             schedule_changed = self._schedules_fingerprint_changed(schedule_bitmaps)
-            need_full = self._daily_full_refresh_pending() or schedule_changed
-            if schedule_changed:
+            need_full = force_full or self._daily_full_refresh_pending() or schedule_changed
+            if force_full:
+                log.info("全刷由调用方强制（%s 推送），本次上屏完整内容", reason)
+            elif schedule_changed:
                 log.info("日程内容变化，本次全刷上屏")
             elif need_full:
                 log.info("今日全刷尚未完成，本次全刷更新日期/倒计时与日程")
