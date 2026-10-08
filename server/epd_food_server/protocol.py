@@ -165,12 +165,12 @@ def decode_reset_reason(reason: int) -> str:
 
 
 def parse_status_response(resp: Response) -> dict:
-    """诊断状态块 18 字节：app_version | proto | boot_count(16) |
-    uptime_s(32) | resetreas(32) | connect_count(16) |
-    last_disconnect_reason | model_id | display_mode | week_start。"""
+    """诊断状态块 16 字节：app_version | proto | boot_count(16) |
+    uptime_s(32) | resetreas(32) | connect_count(16) | last_disconnect |
+    model_id。"""
     p = resp.payload
-    if len(p) < 18:
-        raise ProtocolError(f"STATUS 载荷不足 18 字节: {p.hex()}")
+    if len(p) < 16:
+        raise ProtocolError(f"STATUS 载荷不足 16 字节: {p.hex()}")
     resetreas = struct.unpack_from(">I", p, 8)[0]
     return {
         "firmware": p[0],
@@ -181,8 +181,6 @@ def parse_status_response(resp: Response) -> dict:
         "connect_count": struct.unpack_from(">H", p, 12)[0],
         "last_disconnect_reason": hex(p[14]),
         "model_id": p[15],
-        "display_mode": p[16],
-        "week_start": p[17],
     }
 
 def parse_caps_response(resp: Response) -> CapsInfo:
