@@ -17,8 +17,9 @@ from .config import Config
 class DeviceError(RuntimeError):
     """BLE 层错误（扫描不到设备、连接失败等），stage 标记失败阶段。"""
 
-    def __init__(self, message: str, stage: str | None = None):
+    def __init__(self, message: str, status: int | None = None, stage: str | None = None):
         super().__init__(message)
+        self.status = status
         self.stage = stage
 
 
