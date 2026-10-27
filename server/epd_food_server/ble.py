@@ -103,6 +103,7 @@ class EpdSession:
                 protocol.CMD_STATUS, transaction=0, timeout=5.0
             )
             status = protocol.parse_status_response(response)
+            self._device_status = status
             self._log(
                 f"设备状态: fw=0x{status['firmware']:02X} boot={status['boot_count']} "
                 f"uptime={status['uptime_s']}s reset={status['reset_reason']}"

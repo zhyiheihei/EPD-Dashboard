@@ -72,3 +72,33 @@ def test_session_closes_before_settle(monkeypatch, tmp_path):
         "disconnect",
         "settle",
     ]
+
+
+def test_device_status_property_exposes_last_read():
+    """read_device_status 的结果必须挂到 session 上：推送成功后要拿 boot_count
+    判断设备是否重启过（否则每次 watch 都以为设备重启了，每 5 分钟推一次）。"""
+    from epd_food_server.ble import EpdSession
+
+    session = object.__new__(EpdSession)
+    session._device_status = None
+    session._stage = None
+    session._log = lambda *a, **k: None
+    session._write = _async_none
+    session._wait_response = _async_status
+
+    import asyncio
+
+    status = asyncio.run(EpdSession.read_device_status(session))
+    assert status["boot_count"] == 3
+    assert session.device_status == status
+
+
+async def _async_none(*args, **kwargs):
+    return None
+
+
+async def _async_status(*args, **kwargs):
+    from epd_food_server import protocol
+
+    payload = bytes.fromhex("290100030011 1a000000000200031307".replace(" ", ""))
+    return protocol.Response(protocol=1, transaction=0, command=protocol.CMD_STATUS, status=0, payload=payload)
