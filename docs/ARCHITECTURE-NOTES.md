@@ -40,6 +40,8 @@ EPD-Dashboard push 到 GitHub → zhyi-packages `nvfetcher -f epd-food-server`�
   `get_services()`，代码用 `_wait_services()` 轮询 `client.services`；Nix 包取
   nixpkgs 的 bleak（现 3.0.2），别再按 `<1` 安装
 - 同一时刻只允许一个 BLE 扫描进程
+- 无任务不占用设备：COMMIT OK 收到即断开 BLE（屏幕物理刷新由设备自己走完），
+  等刷新（settle）在会话关闭之后执行；读固件版本/OTA 也是用完即断
 - 判断推送是否生效必须看屏幕实际内容，不能只信日志（v25 固件曾协议层全成功但屏幕不动）
 - 生产验证前 `ss -tlnp` 确认端口归属、psql 直查生产库对数（曾发生本地假隧道事故）
 - `pkill -f "epd_food_server"` 会自杀，用 `[e]pd_food_server` 模式

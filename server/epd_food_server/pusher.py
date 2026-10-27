@@ -706,8 +706,13 @@ class Pusher:
                     schedule_bitmaps=schedule_bitmaps,
                     commit_flags=flags,
                 )
-                # 局部刷新仅刷新 ~1-2s，无需等全刷的 16s
-                self._settle(3.0 if flags & protocol.COMMIT_PARTIAL else None)
-                return session.device_name or "unknown", session.device_status
+                device = session.device_name or "unknown"
+                device_status = session.device_status
+            # COMMIT OK 已到达，事务一结束就断开 BLE 链路；屏幕物理刷新
+            # 由设备自己走完，不需要保持连接（无任务时不占用设备）
+            log.info("推送事务完成，已断开 %s", device)
+            # 局部刷新仅刷新 ~1-2s，无需等全刷的 16s
+            self._settle(3.0 if flags & protocol.COMMIT_PARTIAL else None)
+            return device, device_status
 
         return asyncio.run(run())
