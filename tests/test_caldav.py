@@ -415,3 +415,71 @@ def test_multiday_event_uses_dtend_duration():
     events = parse_ics(ics, ZoneInfo("Asia/Shanghai"), now, now + timedelta(days=60))
     assert len(events) == 1
     assert events[0].end_utc - events[0].start_utc == timedelta(days=1, hours=16)
+
+
+def test_pusher_asks_caldav_for_a_lookback_window():
+    """请求窗口必须回看（跨天日程几天前就开始了），并从 now 之前取交集。"""
+    captured = {}
+    now = datetime.now(timezone.utc)
+
+    import tempfile
+
+    from epd_food_server.pusher import SCHEDULE_LOOKBACK_DAYS
+
+    pusher = object.__new__(Pusher)
+    pusher._cfg = type(
+        "Cfg",
+        (),
+        {
+            "caldav_url": "https://cal.example/dav/zhyi/",
+            "caldav_user": "zhyi",
+            "caldav_password": "pw",
+            "caldav_calendar": "calendar",
+            "caldav_enabled": True,
+            "schedule_horizon_days": 30,
+            "timezone": "Asia/Shanghai",
+            "state_dir": Path(tempfile.mkdtemp(prefix="epd-sched-")),
+        },
+    )()
+    pusher._font = None
+    pusher._save_schedule_cache = lambda *a, **k: None
+
+    def fake_fetch(self, start, end, tz):
+        captured["start"] = start
+        captured["end"] = end
+        return []
+
+    original = CalDavClient.fetch_events
+    CalDavClient.fetch_events = fake_fetch
+    try:
+        Pusher._fetch_schedules(pusher)
+    finally:
+        CalDavClient.fetch_events = original
+
+    lookback = now - captured["start"]
+    assert timedelta(days=SCHEDULE_LOOKBACK_DAYS - 1) < lookback < timedelta(days=SCHEDULE_LOOKBACK_DAYS + 1)
+    assert captured["end"] > now + timedelta(days=29)
+
+
+def test_multiday_event_keeps_range_after_timezone_shift():
+    """UTC 结束时间跨到本地次日凌晨时，本地日期也要跨天（显示范围）。"""
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo("Asia/Shanghai")
+    # 本地 22:00 开始、次日 02:00 结束
+    start_local = (datetime.now(zone) + timedelta(days=1)).replace(
+        hour=22, minute=0, second=0, microsecond=0
+    )
+    events = [
+        CalEvent(
+            summary="夜班",
+            start_utc=start_local,
+            end_utc=start_local + timedelta(hours=4),
+        )
+    ]
+    pusher = make_schedule_pusher(events)
+    schedules, _ = pusher._fetch_schedules()
+    assert schedules[0].end_utc - schedules[0].start_utc == 4 * 3600
+    start_local_t = datetime.fromtimestamp(schedules[0].start_utc, ZoneInfo("Asia/Shanghai"))
+    end_local_t = datetime.fromtimestamp(schedules[0].end_utc, ZoneInfo("Asia/Shanghai"))
+    assert end_local_t.date() == start_local_t.date() + timedelta(days=1)
