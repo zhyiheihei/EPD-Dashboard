@@ -402,3 +402,16 @@ def test_pusher_includes_multiday_event_in_progress():
     end_on_wire = int.from_bytes(frame[offset + 6 : offset + 10], "big")
     assert start_on_wire == schedules[0].start_utc
     assert end_on_wire == schedules[0].end_utc
+
+
+def test_multiday_event_uses_dtend_duration():
+    """DTEND 必须按 (value, params, tz) 解析：写反会让跨天事件退化成 2 小时。"""
+    ics = (
+        "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:x\r\n"
+        "DTSTART:20261027T120000Z\r\nDTEND:20261029T040000Z\r\n"
+        "SUMMARY:出差\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+    )
+    now = datetime(2026, 10, 27, tzinfo=timezone.utc)
+    events = parse_ics(ics, ZoneInfo("Asia/Shanghai"), now, now + timedelta(days=60))
+    assert len(events) == 1
+    assert events[0].end_utc - events[0].start_utc == timedelta(days=1, hours=16)

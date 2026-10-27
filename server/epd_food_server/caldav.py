@@ -178,8 +178,11 @@ def _build_event(
 
     duration: timedelta | None = None
     if "DTEND" in block:
+        # 注意参数顺序是 (value, params, tz)，与 DTSTART 一致；写反会让
+        # DTEND 永远解析失败，跨天事件退化成 2 小时兜底。
+        end_params, end_value = block["DTEND"]
         try:
-            end = _parse_ics_dt(*block["DTEND"], default_tz)
+            end = _parse_ics_dt(end_value, end_params, default_tz)
             if end:
                 duration = end - start
         except Exception:
