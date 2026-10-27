@@ -298,3 +298,20 @@ def test_uptime_reveals_reboot_when_boot_count_resets(tmp_path):
     assert 180 + 120 < elapsed
     # 设备已运行 20 分钟 → 没有重启
     assert not (1200 + 120 < elapsed)
+
+
+def test_device_probe_recorded_and_exported(tmp_path):
+    """每小时探测的结果要留档并进指标（兼作硬件健康检查）。"""
+    path = tmp_path / "metrics" / "epd-food.prom"
+    pusher = make_pusher(tmp_path / "state", textfile_path=path)
+    assert pusher.read_status()["device_probe"] is None
+    pusher.record_device_probe(
+        {"device": "NRF_EPD_3E1C", "boot_count": 2, "uptime_s": 3600, "connect_count": 9}
+    )
+    probe = pusher.read_status()["device_probe"]
+    assert probe["boot_count"] == 2 and probe["uptime_s"] == 3600
+    text = path.read_text()
+    assert "epd_food_device_uptime_seconds 3600" in text
+    assert "epd_food_device_boot_count 2" in text
+    assert "epd_food_device_connect_count 9" in text
+    assert "epd_food_probe_timestamp_seconds 0" not in text

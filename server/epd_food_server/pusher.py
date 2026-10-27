@@ -288,6 +288,30 @@ class Pusher:
         except Exception as exc:
             log.warning("面板状态文件写入失败: %s", exc)
 
+    def record_device_probe(self, probe: dict) -> None:
+        """记下定时探测到的设备状态，供状态接口与指标展示（也当健康检查）。"""
+        payload = {"probe": {**probe, "at": _iso_now()}}
+        try:
+            self._cfg.state_dir.mkdir(parents=True, exist_ok=True)
+            current = {}
+            try:
+                current = json.loads(self._panel_state_path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                pass
+            current.update(payload)
+            _atomic_write_json(self._panel_state_path, current)
+        except Exception as exc:
+            log.warning("设备探测状态写入失败: %s", exc)
+        self._write_metrics()
+
+    def _device_probe(self) -> dict | None:
+        try:
+            data = json.loads(self._panel_state_path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        probe = data.get("probe")
+        return probe if isinstance(probe, dict) else None
+
     def _last_success_at(self) -> str | None:
         try:
             return json.loads(self._last_success_path.read_text(encoding="utf-8")).get("at")
@@ -324,6 +348,23 @@ class Pusher:
             "# TYPE epd_food_push_retry_timestamp_seconds gauge",
             f"epd_food_push_retry_timestamp_seconds {next_at.timestamp() if next_at else 0.0:.0f}",
         ]
+        # 设备状态（定时探测带来，兼作硬件健康检查）
+        probe = self._device_probe() or {}
+        probe_at = _parse_iso(probe.get("at"))
+        lines += [
+            "# HELP epd_food_probe_timestamp_seconds Unix time of the last device status probe.",
+            "# TYPE epd_food_probe_timestamp_seconds gauge",
+            f"epd_food_probe_timestamp_seconds {probe_at.timestamp() if probe_at else 0.0:.0f}",
+            "# HELP epd_food_device_uptime_seconds Device uptime reported by the last probe.",
+            "# TYPE epd_food_device_uptime_seconds gauge",
+            f"epd_food_device_uptime_seconds {int(probe.get('uptime_s') or 0)}",
+            "# HELP epd_food_device_boot_count Device boot counter from the last probe.",
+            "# TYPE epd_food_device_boot_count gauge",
+            f"epd_food_device_boot_count {int(probe.get('boot_count') or 0)}",
+            "# HELP epd_food_device_connect_count Device BLE connection counter from the last probe.",
+            "# TYPE epd_food_device_connect_count gauge",
+            f"epd_food_device_connect_count {int(probe.get('connect_count') or 0)}",
+        ]
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_name(f".{path.name}.tmp")
@@ -348,6 +389,7 @@ class Pusher:
         # 旧字段：客户端还在读 paused，语义已改成「待自动重试」
         status["paused"] = retry
         status["last_success"] = self._last_success_at()
+        status["device_probe"] = self._device_probe()
         return status
 
     def _write_status(self, status: PushStatus, history: bool = True) -> None:

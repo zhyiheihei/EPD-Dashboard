@@ -115,6 +115,8 @@ def push_if_device_needs_data(cfg: Config, db: Database) -> int:
 
     db.ensure_schema()
     pusher = Pusher(cfg, db)
+    # 每次探测都留存，等于是每小时一次的硬件健康检查（状态接口/指标可查）
+    pusher.record_device_probe({**state, "needs_push": False})
     # 两个信号并用：boot_count 变了（软复位保留计数）；或设备上报的 uptime
     # 比「距上次成功推送过去的时间」还短（DFU/断电重启会把 boot_count 清零
     # 回 1，只看计数会漏）。120s 容差盖时钟漂移与推送耗时。
@@ -138,6 +140,7 @@ def push_if_device_needs_data(cfg: Config, db: Database) -> int:
         state.get("device"), boot, seen, uptime,
         int(time.time() - pushed_at) if pushed_at else None,
     )
+    pusher.record_device_probe({**state, "needs_push": True})
     status = asyncio.run(pusher.push(reason="watch", force_full=True))
     if status.ok:
         log.info("重启后补推成功: %s 耗时 %ss", status.device, status.duration_s)
