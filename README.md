@@ -37,6 +37,14 @@
   每 15 分钟拉起一次到点的重试，退避期内的 0 点/变更推送让位、不碰设备；
   手动推送不受退避限制。上次成功推送时间落在 `state_dir/last-success.json`，
   并导出 Prometheus textfile 指标供停摆告警；
+- **重启自动补推**：面板内容只存在设备 RAM，重启/OTA 后就空了。`epd-food-watch.timer`
+  每小时连一次、只读 16 字节诊断状态块随即断开（不传图形、不刷屏），用
+  `boot_count` 变化或「设备 uptime 比距上次成功推送的时间还短」判定重启，
+  判定成立立即全刷补推；探测结果同时记入 `state_dir/panel-state.json`、
+  `GET /api/epd/status` 的 `device_probe` 与 `epd_food_device_*` 指标（兼作硬件健康检查）；
+- **日程只上未来/进行中的**：CalDAV 请求窗口回看 60 天（跨天日程可能几天前就开始）、
+  向前到 `EPD_FOOD_SCHEDULE_HORIZON_DAYS`，再按「结束时间 >= now」过滤——
+  跨天日程显示 `月/日 时:分-月/日 时:分`，同日只显示开始时间；
 - 协议详见 `../EPD-nRF5/docs/dashboard-protocol-v1.md`（帧构造在本仓库
   `server/epd_food_server/protocol.py`，与固件参考实现 `html/js/main.js` 逐字节对齐）；
 - 客户端/WebUI/MCP **只**与服务端通信（HTTPS + Bearer Token），不直接触碰数据库
@@ -72,6 +80,7 @@ epd-food-server serve            # 或 python -m epd_food_server serve [--host -
 epd-food-server push-now               # 0 点 timer 走这条（当天首推即全刷）
 epd-food-server push-now --manual      # 手动推送：不受退避限制，成功即清除重试状态
 epd-food-server push-now --retry       # 退避定时器走这条（epd-food-retry.timer，每 15 分钟）
+epd-food-server watch                  # 每小时探一次设备状态，重启过就全刷补推
 epd-food-server ota-push fw-ota.zip    # 上传 nrfutil OTA 包并对设备升级（约 90s）
 ```
 
@@ -115,5 +124,6 @@ nix develop -c pytest tests/ -v
 ```
 
 覆盖：协议帧构造/解析、文字渲染、REST API（FakeDB + httpx）、局部/全刷推送策略、
-OTA 包解析、Secure DFU 引擎（仿真 bootloader）。WebUI 另有端到端回归
+OTA 包解析、Secure DFU 引擎（仿真 bootloader）、CalDAV 拉取（含跨天事件回看窗口与
+DTEND 时长）、传输失败退避重试、重启检测与指标导出。WebUI 另有端到端回归
 `docs/ui/webtest.py`（需服务运行中）。
