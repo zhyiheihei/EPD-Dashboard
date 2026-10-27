@@ -67,18 +67,27 @@ def _log_serve_banner(cfg: Config) -> None:
     )
 
 
-def push_now(cfg: Config, db: Database, manual: bool = False) -> int:
+def push_now(cfg: Config, db: Database, manual: bool = False, retry: bool = False) -> int:
     """供 systemd timer 调用：直接推送一次，成功返回 0。
 
-    --manual 绕过传输失败后的自动推送暂停，成功时同时解除暂停。
+    --manual 绕过传输失败的退避限制，成功时同时清除重试状态。
+    --retry 是退避定时器的自动重试：未到点或无需重试时直接跳过，
+    尝试失败也返回 0（失败详情与指标已落盘，停摆由 Prometheus 告警）。
     """
     from .pusher import Pusher
 
     db.ensure_schema()
     pusher = Pusher(cfg, db)
-    status = asyncio.run(pusher.push(reason="manual" if manual else "timer"))
+    reason = "manual" if manual else ("retry" if retry else "timer")
+    status = asyncio.run(pusher.push(reason=reason))
     if status.ok:
         log.info("推送成功: 设备=%s 条目=%s 耗时=%ss", status.device, status.items, status.duration_s)
+        return 0
+    if retry:
+        if status.ok is None:
+            log.info("自动重试跳过: %s", status.error or "无需重试")
+        else:
+            log.warning("自动重试未成功: %s", status.error)
         return 0
     log.error("推送失败: %s", status.error)
     return 1
@@ -122,7 +131,12 @@ def main(argv: list[str] | None = None) -> int:
     push_now_parser.add_argument(
         "--manual",
         action="store_true",
-        help="按手动推送执行：绕过传输失败后的自动推送暂停，成功时解除暂停",
+        help="按手动推送执行：绕过传输失败的退避限制，成功时清除重试状态",
+    )
+    push_now_parser.add_argument(
+        "--retry",
+        action="store_true",
+        help="按退避定时器执行：仅在到点且有待重试失败时尝试，失败不报错退出",
     )
     ota_parser = sub.add_parser("ota-push", help="对墨水屏执行固件 OTA 升级")
     ota_parser.add_argument("zip", help="nrfutil 生成的 *-ota.zip 包路径")
@@ -142,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
         serve(cfg, db)
         return 0
     if args.command == "push-now":
-        return push_now(cfg, db, manual=args.manual)
+        return push_now(cfg, db, manual=args.manual, retry=args.retry)
     if args.command == "ota-push":
         return ota_push(cfg, db, args.zip)
     parser.error(f"未知命令: {args.command}")

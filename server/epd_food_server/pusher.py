@@ -52,6 +52,16 @@ def _iso_now() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else parsed.astimezone()
+
+
 def _atomic_write_json(path: Path, payload: dict) -> None:
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -114,34 +124,87 @@ class Pusher:
             return flags
         return flags | protocol.COMMIT_PARTIAL
 
-    # ---------- 传输失败保护（暂停自动推送） ----------
+    # ---------- 传输失败后的自动重试（自愈） ----------
 
     @property
-    def _paused_path(self) -> Path:
+    def _retry_path(self) -> Path:
+        return self._cfg.state_dir / "push-retry.json"
+
+    @property
+    def _legacy_paused_path(self) -> Path:
         return self._cfg.state_dir / "push-paused.json"
 
     @property
     def _failure_path(self) -> Path:
         return self._cfg.state_dir / "last-failure.json"
 
-    def _read_paused(self) -> dict | None:
+    @property
+    def _last_success_path(self) -> Path:
+        return self._cfg.state_dir / "last-success.json"
+
+    def _read_retry(self) -> dict | None:
         try:
-            return json.loads(self._paused_path.read_text(encoding="utf-8"))
+            return json.loads(self._retry_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            log.warning("推送重试状态读取失败: %s", exc)
+            return None
+        return self._migrate_legacy_pause()
+
+    def _migrate_legacy_pause(self) -> dict | None:
+        """旧版「暂停等人工推送」状态 → 立即到点的重试记录（升级后自愈，不靠人）。"""
+        try:
+            legacy = json.loads(self._legacy_paused_path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             return None
         except Exception as exc:
-            log.warning("推送暂停状态读取失败: %s", exc)
+            log.warning("旧版推送暂停状态读取失败: %s", exc)
             return None
+        retry = {
+            "failures": 1,
+            "at": legacy.get("at") or _iso_now(),
+            "next_attempt_at": _iso_now(),
+            "retry_after_s": 0.0,
+            "reason": legacy.get("reason"),
+            "error": legacy.get("error"),
+            "stage": legacy.get("stage"),
+            "device": legacy.get("device"),
+        }
+        log.info("检测到旧版推送暂停状态（%s），转为自动重试", legacy.get("error"))
+        try:
+            self._cfg.state_dir.mkdir(parents=True, exist_ok=True)
+            _atomic_write_json(self._retry_path, retry)
+            self._legacy_paused_path.unlink(missing_ok=True)
+        except Exception as exc:
+            log.warning("旧版暂停状态迁移失败: %s", exc)
+            return None
+        return retry
 
-    def _pause_automated(self, status: PushStatus) -> None:
-        """传输失败后暂停自动推送，人工确认前不再碰面板。
+    def _retry_delay(self, failures: int) -> float:
+        base = max(1.0, self._cfg.retry_base_seconds)
+        ceiling = max(base, self._cfg.retry_max_seconds)
+        return min(ceiling, base * (2 ** max(0, failures - 1)))
 
-        本机全局 journal 极易被冲掉、epd 命名空间也可能轮转：把失败详情
-        落盘 state_dir（last-failure.json + push-paused.json），并停止后续
-        自动推送，避免错误被下一次推送的日志冲掉。手动推送成功后恢复。
+    def _retry_due(self, retry: dict) -> bool:
+        next_at = _parse_iso(retry.get("next_attempt_at"))
+        return next_at is None or next_at <= datetime.now(timezone.utc).astimezone()
+
+    def _schedule_retry(self, status: PushStatus) -> None:
+        """传输失败 → 按指数退避排下一次自动重试，失败详情落盘供事后查。
+
+        旧版是一次传输失败就永久暂停、等人工推送恢复；2026-10-12 一次连接
+        超时因此静默了 15 天，这里改成自己退避重试。
         """
+        previous = self._read_retry() or {}
+        failures = int(previous.get("failures") or 0) + 1
+        delay = self._retry_delay(failures)
+        next_at = datetime.now(timezone.utc).astimezone() + timedelta(seconds=delay)
         payload = {
+            "failures": failures,
             "at": _iso_now(),
+            "next_attempt_at": next_at.isoformat(timespec="seconds"),
+            "retry_after_s": round(delay, 1),
             "reason": status.reason,
             "error": status.error,
             "stage": status.stage,
@@ -149,22 +212,80 @@ class Pusher:
         }
         try:
             self._cfg.state_dir.mkdir(parents=True, exist_ok=True)
-            _atomic_write_json(self._paused_path, payload)
+            _atomic_write_json(self._retry_path, payload)
             _atomic_write_json(self._failure_path, status.to_dict())
         except Exception as exc:
-            log.warning("推送暂停状态写入失败: %s", exc)
+            log.warning("推送重试状态写入失败: %s", exc)
         log.error(
-            "传输失败，已暂停自动推送（stage=%s error=%s）。恢复方式：WebUI/"  
-            "API 手动推送成功，或 epd-food-server push-now --manual",
-            status.stage, status.error,
+            "传输失败（stage=%s error=%s），第 %s 次失败，%ss 后自动重试",
+            status.stage, status.error, failures, int(delay),
         )
+        self._write_metrics()
 
-    def _resume(self) -> None:
+    def _clear_retry(self, status: PushStatus | None = None) -> None:
+        for path in (self._retry_path, self._failure_path, self._legacy_paused_path):
+            try:
+                path.unlink(missing_ok=True)
+            except Exception as exc:
+                log.warning("推送重试状态清理失败: %s", exc)
+        if status is not None and status.ok:
+            try:
+                _atomic_write_json(
+                    self._last_success_path,
+                    {
+                        "at": status.finished_at or _iso_now(),
+                        "device": status.device,
+                        "items": status.items,
+                    },
+                )
+            except Exception as exc:
+                log.warning("上次成功推送记录写入失败: %s", exc)
+        self._write_metrics()
+
+    def _last_success_at(self) -> str | None:
         try:
-            self._paused_path.unlink(missing_ok=True)
-            self._failure_path.unlink(missing_ok=True)
+            return json.loads(self._last_success_path.read_text(encoding="utf-8")).get("at")
+        except FileNotFoundError:
+            pass
         except Exception as exc:
-            log.warning("推送暂停状态清理失败: %s", exc)
+            log.warning("上次成功推送记录读取失败: %s", exc)
+        # 升级前没有 last-success.json：若旧状态是成功推送，就用它的时间
+        try:
+            status = json.loads(self._cfg.status_path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        return status.get("finished_at") if status.get("ok") is True else None
+
+    def _write_metrics(self) -> None:
+        """导出 Prometheus textfile 指标：停摆靠它告警，不再靠人发现面板陈旧。"""
+        path = self._cfg.textfile_path
+        if path is None:
+            return
+        last_success = _parse_iso(self._last_success_at())
+        retry = self._read_retry()
+        next_at = _parse_iso(retry.get("next_attempt_at")) if retry else None
+        lines = [
+            "# HELP epd_food_last_success_timestamp_seconds Unix time of the last successful panel push.",
+            "# TYPE epd_food_last_success_timestamp_seconds gauge",
+            f"epd_food_last_success_timestamp_seconds {last_success.timestamp() if last_success else 0.0:.0f}",
+            "# HELP epd_food_push_failures Consecutive transfer failures waiting for retry.",
+            "# TYPE epd_food_push_failures gauge",
+            f"epd_food_push_failures {int(retry.get('failures') or 0) if retry else 0}",
+            "# HELP epd_food_push_retry_pending 1 while automated pushes are in retry backoff.",
+            "# TYPE epd_food_push_retry_pending gauge",
+            f"epd_food_push_retry_pending {1 if retry else 0}",
+            "# HELP epd_food_push_retry_timestamp_seconds Unix time of the next scheduled retry.",
+            "# TYPE epd_food_push_retry_timestamp_seconds gauge",
+            f"epd_food_push_retry_timestamp_seconds {next_at.timestamp() if next_at else 0.0:.0f}",
+        ]
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(f".{path.name}.tmp")
+            tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, path)
+        except Exception as exc:
+            log.warning("推送指标写入失败: %s", exc)
 
     def read_status(self) -> dict:
         """合并文件中的最近一次结果与内存中的进行中标记。"""
@@ -175,17 +296,22 @@ class Pusher:
             pass
         except Exception as exc:
             log.warning("推送状态文件读取失败: %s", exc)
+        retry = self._read_retry()
         status["in_progress"] = self._in_progress
-        status["paused"] = self._read_paused()
+        status["retry"] = retry
+        # 旧字段：客户端还在读 paused，语义已改成「待自动重试」
+        status["paused"] = retry
+        status["last_success"] = self._last_success_at()
         return status
 
-    def _write_status(self, status: PushStatus) -> None:
+    def _write_status(self, status: PushStatus, history: bool = True) -> None:
         try:
             self._cfg.status_path.parent.mkdir(parents=True, exist_ok=True)
             _atomic_write_json(self._cfg.status_path, status.to_dict())
         except Exception as exc:
             log.warning("推送状态文件写入失败: %s", exc)
-        self._append_history(status)
+        if history:
+            self._append_history(status)
 
     def _append_history(self, status: PushStatus) -> None:
         path = self._cfg.state_dir / "push-history.jsonl"
@@ -252,8 +378,9 @@ class Pusher:
     async def push(self, reason: str, force_full: bool = False) -> PushStatus:
         """执行一次完整推送。API 与 0 点 timer 通过文件锁互斥。
 
-        传输失败后自动推送（timer/change/serve）暂停，直到手动推送成功恢复；
-        reason=manual 不受暂停限制，且成功时清除暂停状态。
+        传输失败后按指数退避自动重试（reason=retry 的 15 分钟定时器负责），
+        冷却期内的自动推送（timer/change/serve）让位给重试、不碰设备；
+        reason=manual 不受退避限制，成功时清除重试状态。
 
         force_full=True 跳过每日全刷/日程变化判断强制全刷（服务启动时的
         serve 推送用）：面板 RAM 不随 MCU 复位保留，服务重启后首次推送
@@ -261,29 +388,36 @@ class Pusher:
         """
         if self._busy.locked():
             return PushStatus(ok=None, reason=reason, error="已有推送在进行中")
+        retry = self._read_retry()
         if reason != "manual":
-            paused = self._read_paused()
-            if paused:
-                log.warning(
-                    "自动推送已暂停（上次传输失败未恢复），跳过本次 %s 推送: %s",
-                    reason, paused.get("error"),
-                )
-                status = PushStatus(
-                    ok=False,
+            if reason == "retry" and retry is None:
+                log.debug("没有待重试的推送失败，跳过自动重试")
+                return PushStatus(ok=None, reason=reason, error="没有待重试的推送失败")
+            if retry is not None and not self._retry_due(retry):
+                deferred = PushStatus(
+                    ok=None,
                     reason=reason,
-                    error=f"自动推送已暂停，需手动推送恢复（上次失败: {paused.get('error')}）",
-                    stage=paused.get("stage"),
+                    error=(
+                        f"等待自动重试（{retry.get('next_attempt_at')}，已失败 "
+                        f"{retry.get('failures')} 次: {retry.get('error')}）"
+                    ),
+                    stage=retry.get("stage"),
                 )
-                self._write_status(status)
-                return status
+                log.info("%s 推送让位于自动重试：%s", reason, deferred.error)
+                if reason != "retry":
+                    self._write_status(deferred, history=False)
+                return deferred
+        self._write_metrics()
         async with self._busy:
             status = await asyncio.to_thread(self._push_blocking, reason, force_full)
         if status.ok:
-            self._resume()
+            self._clear_retry(status)
         elif status.ok is False and status.stage not in (None, "prepare", "lock"):
-            # 只有传输链路（扫描/连接/协议事务）失败才暂停；数据库/渲染等
+            # 只有传输链路（扫描/连接/协议事务）失败才退避重试；数据库/渲染等
             # 准备阶段错误不代表设备不可达，不阻断后续自动推送
-            self._pause_automated(status)
+            self._schedule_retry(status)
+        else:
+            self._write_metrics()
         return status
 
     def _push_blocking(self, reason: str, force_full: bool = False) -> PushStatus:

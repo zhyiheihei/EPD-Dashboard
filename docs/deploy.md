@@ -92,7 +92,8 @@ curl -s 127.0.0.1:8386/api/health                                               
 | 推送成功但屏幕没变 | 全刷约 16s、局部刷新仅刷新食品栏约 2s；`43 OK` 后服务端已按 settle 等待 |
 | 局部刷新后屏幕周围轻微灰边 | 窗口边界电容串扰（物理特性）；平时局刷，每天 0 点定时推送全刷自动清除（固件 v24 起午夜不再自刷，全刷全由服务端负责） |
 | 日期/倒计时没更新 | 依赖每天首次推送的全刷；确认 0 点 timer 有跑（`systemctl list-timers epd-food-push`），或手动 `systemctl start epd-food-push`（当天首推即补全刷） |
-| 自动推送被跳过（日志出现「自动推送已暂停」） | 上次传输失败后保护性暂停；看 `state_dir/last-failure.json` 定位失败阶段，修好后 WebUI 手动推送或 `systemctl start epd-food-push`（默认 timer 语义会被暂停拦截，用 `push-now --manual` 或 WebUI 按钮恢复） |
+| 自动推送在等待重试（日志出现「等待自动重试」） | 上次传输失败后的指数退避（15 分钟起、6 小时封顶）；看 `state_dir/last-failure.json` 定位失败阶段，`state_dir/push-retry.json` 有下次重试时间；到点由 `epd-food-retry.timer` 自动重试，也可手动 `push-now --manual` 立即重试 |
+| 面板停摆但服务在跑 | 看 `epd_food_last_success_timestamp_seconds` / `epd_food_push_failures` 指标（`EPD_FOOD_TEXTFILE_PATH` 落盘，node-exporter textfile 采集）；`journalctl --namespace=epd` 查失败阶段 |
 | OTA 卡住不动 | 看 `/api/ota/status` 的 error 与进度；设备停在 bootloader 时广播名 DfuTarg，重试升级即可 |
 | BLE 失败、D-Bus 权限 | `sudo -u epd-dashboard dbus-send --system --print-reply --dest=org.bluez / org.freedesktop.DBus.Introspectable.Introspect` |
 | 字体方块 | `ls -l /nix/store/*epd-food-cjk-font*`；journal 里 EPD_FOOD_FONT_PATH 是否存在 |

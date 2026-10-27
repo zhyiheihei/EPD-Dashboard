@@ -64,6 +64,9 @@ class Config:
     settle_seconds: float  # COMMIT OK 后等待屏幕物理刷新的时间
     push_retries: int
     retry_backoff: float
+    # 传输失败后的自动重试（指数退避，0 次退避=每次定时器都试）
+    retry_base_seconds: float
+    retry_max_seconds: float
     # 推送策略
     push_on_change: bool
     push_debounce: float
@@ -76,6 +79,7 @@ class Config:
     caldav_password: str
     caldav_calendar: str  # 日历集合路径；空 = PROPFIND 自动发现
     schedule_horizon_days: int  # 拉取窗口（天）；日程展示的是窗口内最近 N 条，而非最近 N 天内
+    textfile_path: Path | None  # Prometheus textfile 指标落盘路径；None = 不导出
 
     @property
     def lock_path(self) -> Path:
@@ -108,6 +112,8 @@ class Config:
             push_retries=_env_int("PUSH_RETRIES", 2),
             # 首次失败后设备需重新广播（约 10s+），backoff 太短会连续扫不到设备
             retry_backoff=_env_float("RETRY_BACKOFF", 12.0),
+            retry_base_seconds=_env_float("RETRY_BASE_SECONDS", 900.0),
+            retry_max_seconds=_env_float("RETRY_MAX_SECONDS", 21600.0),
             push_on_change=_env_bool("PUSH_ON_CHANGE", True),
             push_debounce=_env_float("PUSH_DEBOUNCE", 10.0),
             # 手动变更后的局刷节流：墨水屏刷新寿命有限，间隔 5 分钟
@@ -122,6 +128,7 @@ class Config:
             schedule_horizon_days=_env_int(
                 "SCHEDULE_HORIZON_DAYS", _env_int("SCHEDULE_DAYS", 365)
             ),
+            textfile_path=Path(path) if (path := _env("TEXTFILE_PATH")) else None,
         )
 
 

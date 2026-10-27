@@ -83,10 +83,12 @@ MTU 244 时单片约 230 字节（Linux/BlueZ 默认可用）；可配置 `EPD_F
 - **食品局刷只由手动更新数据触发**（WebUI/客户端/MCP 写库后的变更防抖推送，
   COMMIT flag `0x04`，需 CAPS 特征位 `1<<6`）：仅刷新食品面板内容区，约 2s
   不闪屏；变更推送节流 `EPD_FOOD_CHANGE_MIN_INTERVAL`（默认 **300 秒**）；
-- 传输失败保护：推送到设备失败（扫描/连接/协议事务）时，把失败阶段与错误
-  详情落盘 `state_dir/last-failure.json` 并写入 `push-paused.json` 暂停后续
-  自动推送（0 点 timer 与变更推送跳过），避免错误被后续推送日志冲掉；
-  WebUI/API 手动推送或 `epd-food-server push-now --manual` 成功后解除暂停；
+- 传输失败自愈重试：推送到设备失败（扫描/连接/协议事务）时，把失败阶段与
+  错误详情落盘 `state_dir/last-failure.json`，并按指数退避排下一次重试
+  （`EPD_FOOD_RETRY_BASE_SECONDS`=900 起翻倍，`EPD_FOOD_RETRY_MAX_SECONDS`=21600
+  封顶），状态记在 `push-retry.json`；`epd-food-retry.timer` 每 15 分钟拉起
+  `push-now --retry`，到点就真试一次，退避期内的 0 点与变更推送让位（不碰设备、
+  不污染推送历史）；手动推送不受退避限制，成功即清除重试状态；
 - COMMIT OK 后 settle 等待：全刷 16s（`EPD_FOOD_SETTLE_SECONDS`）、局部 3s，
   等完才释放文件锁。
 
@@ -203,8 +205,10 @@ state_dir/
 ├── push.lock / ota.lock      flock 互斥（推送 90s、OTA 90s 等待上限）
 ├── push-status.json          最近一次推送结果（/api/epd/status 数据源）
 ├── push-history.jsonl        推送历史（含每次失败详情，保留最近 100 条）
-├── push-paused.json          存在 = 传输失败后自动推送已暂停（手动推送成功后删除）
+├── push-paused.json          旧版暂停状态（升级后自动迁移成 push-retry.json）
+├── push-retry.json           存在 = 传输失败后退避重试中（含失败次数与下次重试时间）
 ├── last-failure.json         最近一次未恢复的传输失败详情
+├── last-success.json         上次成功推送的时间/设备/条目（停摆告警依据）
 ├── schedules-cache.json      上次成功拉取的日程（CalDAV 故障降级用）
 ├── ota-status.json           最近一次 OTA 结果与字节进度
 ├── last-full-refresh.txt     上次全刷日期（当天首推全刷的判定依据）
@@ -219,12 +223,15 @@ state_dir/
 2. **数据变更**（手动增/删/改/恢复）：防抖 10s 合并后局部刷新推送
    （`EPD_FOOD_PUSH_ON_CHANGE`）；距上次成功推送不足 5 分钟则节流留待下次；
    已有推送进行中则直接跳过（那次推送已带最新数据）
-3. **手动**：客户端/WebUI 墨水屏页按钮 → `POST /api/epd/push`；
+3. **自动重试**：`epd-food-retry.timer` 每 15 分钟拉起 `push-now --retry`，
+   传输失败且退避到点时真推送一次；成功即恢复正常节奏，没到点直接跳过
+4. **手动**：客户端/WebUI 墨水屏页按钮 → `POST /api/epd/push`；
    或服务器上 `epd-food-server push-now --manual`
 
-**传输失败保护**：推送最终失败（重试用尽）时，失败详情落盘
-`state_dir/last-failure.json`，并暂停后续自动推送（0 点 timer 与变更推送跳过，
-状态记录在 `push-paused.json`），避免错误被后续推送的日志冲掉；WebUI/API
-手动推送或 `push-now --manual` 成功后解除暂停。
+**传输失败自愈**：推送最终失败（单次推送内的重试用尽）时，失败详情落盘
+`state_dir/last-failure.json`，退避状态写 `push-retry.json`（失败次数 + 下次重试
+时间），退避期内的 0 点与变更推送让位；到点自动重试，成功即删除全部重试状态。
+失败次数与上次成功时间同时导出为 Prometheus textfile 指标（
+`EPD_FOOD_TEXTFILE_PATH`），停摆由告警发现，不再靠肉眼看面板陈旧。
 
 设备断电/重启后位图丢失（协议 RAM-only），以上任一触发即可重绘。

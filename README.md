@@ -4,7 +4,8 @@
 访问）管理食品数据 → **服务端**（跑在 opi5p 家庭服务器上）落库 PostgreSQL、把
 "最近到期 Top4"推送到墨水屏：每天 0 点定时推送做一次全刷（新数据包含新的
 倒计时日期与当日日程）；食品局刷只由手动更新数据触发（防抖 10s、节流 5 分钟）；
-推送到设备传输失败时记录详情并暂停自动推送，手动推送成功后恢复。
+推送到设备传输失败时记录详情并按指数退避自动重试（15 分钟起，封顶 6 小时），
+不需要人工介入；重试成功即恢复正常节奏。
 
 ```
 ┌────────────────┐  HTTPS + Token(内网)   ┌──────────────────────┐  BLE 看板协议 v1   ┌───────────────┐
@@ -30,9 +31,12 @@
   （约 2s 不闪屏）只由手动更新数据触发，防抖 10s 合并 + 节流 5 分钟
   （固件 v24 起不再午夜自刷）；
 - **传输成功校验**：BEGIN/每位图末片/COMMIT 都必须等到设备 OK 应答；最终传输
-  失败时按阶段（扫描/连接/begin/位图/commit）记录详情到 `state_dir/last-failure.json`
-  并暂停自动推送（`push-paused.json`），避免错误被后续推送日志冲掉；手动推送
-  （WebUI/API 或 `push-now --manual`）成功后恢复；
+  失败时按阶段（扫描/连接/begin/位图/commit）记录详情到 `state_dir/last-failure.json`，
+  并按指数退避（`EPD_FOOD_RETRY_BASE_SECONDS`=900 起翻倍，
+  `EPD_FOOD_RETRY_MAX_SECONDS`=21600 封顶）自动重试：`epd-food-retry.timer`
+  每 15 分钟拉起一次到点的重试，退避期内的 0 点/变更推送让位、不碰设备；
+  手动推送不受退避限制。上次成功推送时间落在 `state_dir/last-success.json`，
+  并导出 Prometheus textfile 指标供停摆告警；
 - 协议详见 `../EPD-nRF5/docs/dashboard-protocol-v1.md`（帧构造在本仓库
   `server/epd_food_server/protocol.py`，与固件参考实现 `html/js/main.js` 逐字节对齐）；
 - 客户端/WebUI/MCP **只**与服务端通信（HTTPS + Bearer Token），不直接触碰数据库
@@ -66,7 +70,8 @@ epd-food-server serve            # 或 python -m epd_food_server serve [--host -
 
 ```bash
 epd-food-server push-now               # 0 点 timer 走这条（当天首推即全刷）
-epd-food-server push-now --manual      # 手动推送：解除传输失败暂停后恢复自动推送
+epd-food-server push-now --manual      # 手动推送：不受退避限制，成功即清除重试状态
+epd-food-server push-now --retry       # 退避定时器走这条（epd-food-retry.timer，每 15 分钟）
 epd-food-server ota-push fw-ota.zip    # 上传 nrfutil OTA 包并对设备升级（约 90s）
 ```
 

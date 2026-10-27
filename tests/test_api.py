@@ -193,6 +193,8 @@ def make_app(db=None, token: str = TOKEN):
         settle_seconds=0,
         push_retries=0,
         retry_backoff=0,
+        retry_base_seconds=900.0,
+        retry_max_seconds=21600.0,
         push_on_change=True,
         push_debounce=0,
         change_min_interval=0,
@@ -203,6 +205,7 @@ def make_app(db=None, token: str = TOKEN):
         caldav_password="",
         caldav_calendar="",
         schedule_horizon_days=365,
+        textfile_path=None,
     )
     app = build_app(cfg, db or FakeDB())
     app.state.pusher = FakePusher()

@@ -1,4 +1,4 @@
-"""推送编排策略测试：全刷决策、成功后落盘、传输失败暂停与手动恢复。
+"""推送编排策略测试：全刷决策、成功后落盘、传输失败后的退避重试与手动推送。
 
 通过 monkeypatch 掉 BLE/渲染等重依赖，只验证 Pusher 的决策与状态机。
 """
@@ -26,6 +26,9 @@ def make_pusher(state_dir: Path, **extra) -> Pusher:
         "settle_seconds": 0,
         "push_retries": 0,
         "retry_backoff": 0,
+        "retry_base_seconds": 900.0,
+        "retry_max_seconds": 21600.0,
+        "textfile_path": None,
         "caldav_enabled": False,
         "timezone": "Asia/Shanghai",
         "commit_sleep": True,
@@ -100,8 +103,8 @@ def test_push_failure_persists_decision_for_retry(monkeypatch, tmp_path):
     assert not (state_dir / "last-schedules.txt").exists()
 
 
-def test_transfer_failure_pauses_automated_pushes(monkeypatch, tmp_path):
-    """传输失败 → 持久化失败记录 + 暂停自动推送；手动推送成功后恢复。"""
+def test_transfer_failure_schedules_retry_backoff(monkeypatch, tmp_path):
+    """传输失败 → 退避重试并落盘失败详情；退避到点自动重试，成功清除。"""
     state_dir = tmp_path / "state"
     pusher = make_pusher(state_dir)
     pusher._db = FakeDB()
@@ -111,31 +114,57 @@ def test_transfer_failure_pauses_automated_pushes(monkeypatch, tmp_path):
     )
     status = asyncio.run(pusher.push(reason="timer"))
     assert status.ok is False and status.stage == "commit"
-    paused = json.loads((state_dir / "push-paused.json").read_text())
-    assert paused["stage"] == "commit"
+    retry = json.loads((state_dir / "push-retry.json").read_text())
+    assert retry["stage"] == "commit" and retry["failures"] == 1
+    assert retry["retry_after_s"] == 900.0
     assert json.loads((state_dir / "last-failure.json").read_text())["stage"] == "commit"
 
-    # timer / change 被暂停拦截，不再触碰设备
+    # 退避未到：timer / change / retry 都不碰设备，且不往历史里刷噪声
     def must_not_run(*args):
-        raise AssertionError("暂停期间不应再跑会话")
+        raise AssertionError("退避期内不应再跑会话")
 
     install_stubs(monkeypatch, pusher, must_not_run)
     skipped = asyncio.run(pusher.push(reason="timer"))
-    assert skipped.ok is False
-    assert "暂停" in (skipped.error or "")
+    assert skipped.ok is None
+    assert "等待自动重试" in (skipped.error or "")
+    assert asyncio.run(pusher.push(reason="retry")).ok is None
+    assert len((state_dir / "push-history.jsonl").read_text().splitlines()) == 1
 
-    # 手动推送放行，成功后解除暂停并清失败记录
+    # 退避到点：retry 定时器放行，成功后清除重试状态
+    retry["next_attempt_at"] = "2000-01-01T00:00:00+08:00"
+    (state_dir / "push-retry.json").write_text(json.dumps(retry))
+    install_stubs(monkeypatch, pusher, lambda *args: ("NRF_EPD_3E1C", None))
+    resumed = asyncio.run(pusher.push(reason="retry"))
+    assert resumed.ok is True
+    assert not (state_dir / "push-retry.json").exists()
+    assert not (state_dir / "last-failure.json").exists()
+    assert pusher._read_retry() is None
+    assert json.loads((state_dir / "last-success.json").read_text())["device"] == "NRF_EPD_3E1C"
+    # 清除后自动推送恢复
+    assert asyncio.run(pusher.push(reason="change")).ok is True
+
+
+def test_manual_push_ignores_backoff(monkeypatch, tmp_path):
+    """手动推送不受退避限制；连续失败时退避时长递增并封顶。"""
+    state_dir = tmp_path / "state"
+    pusher = make_pusher(state_dir)
+    pusher._db = FakeDB()
     install_stubs(
         monkeypatch, pusher,
-        lambda *args: ("NRF_EPD_3E1C", None),
+        lambda *args: (_ for _ in ()).throw(DeviceError("连接超时", stage="connect")),
     )
-    resumed = asyncio.run(pusher.push(reason="manual"))
-    assert resumed.ok is True
-    assert not (state_dir / "push-paused.json").exists()
-    assert not (state_dir / "last-failure.json").exists()
-    assert pusher._read_paused() is None
-    # 解除后自动推送恢复
-    assert asyncio.run(pusher.push(reason="change")).ok is True
+    assert asyncio.run(pusher.push(reason="timer")).ok is False
+    manual = asyncio.run(pusher.push(reason="manual"))
+    assert manual.ok is False
+    retry = json.loads((state_dir / "push-retry.json").read_text())
+    assert retry["failures"] == 2 and retry["retry_after_s"] == 1800.0
+
+
+def test_retry_delay_grows_then_caps(tmp_path):
+    pusher = make_pusher(tmp_path / "state")
+    assert [pusher._retry_delay(n) for n in range(1, 9)] == [
+        900.0, 1800.0, 3600.0, 7200.0, 14400.0, 21600.0, 21600.0, 21600.0
+    ]
 
 
 def test_prepare_failure_does_not_pause(monkeypatch, tmp_path):
@@ -150,14 +179,7 @@ def test_prepare_failure_does_not_pause(monkeypatch, tmp_path):
     install_stubs(monkeypatch, pusher, must_not_run)
     status = asyncio.run(pusher.push(reason="timer"))
     assert status.ok is False and status.stage == "prepare"
-    assert not (state_dir / "push-paused.json").exists()
-
-
-def test_read_status_includes_paused(monkeypatch, tmp_path):
-    pusher = make_pusher(tmp_path / "state")
-    assert pusher.read_status().get("paused") is None
-    pusher._pause_automated(PushStatus(ok=False, reason="timer", error="x", stage="commit"))
-    assert pusher.read_status()["paused"]["stage"] == "commit"
+    assert not (state_dir / "push-retry.json").exists()
 
 
 def test_serve_push_forces_full_refresh(monkeypatch, tmp_path):
@@ -184,7 +206,7 @@ def test_serve_push_forces_full_refresh(monkeypatch, tmp_path):
     assert status2.ok is True
     assert seen["force_full"] is False
 
-    # serve 处于暂停状态时被拦下（非 manual）
+    # serve 处于退避期内同样让位（非 manual）
     install_stubs(
         monkeypatch, pusher,
         lambda *args: (_ for _ in ()).throw(DeviceError("COMMIT 超时", stage="commit")),
@@ -192,6 +214,53 @@ def test_serve_push_forces_full_refresh(monkeypatch, tmp_path):
     failed = asyncio.run(pusher.push(reason="timer"))
     assert failed.ok is False
     install_stubs(monkeypatch, pusher, run_session)
-    paused = asyncio.run(pusher.push(reason="serve", force_full=True))
-    assert paused.ok is False
-    assert "暂停" in (paused.error or "")
+    deferred = asyncio.run(pusher.push(reason="serve", force_full=True))
+    assert deferred.ok is None
+    assert "等待自动重试" in (deferred.error or "")
+
+
+def test_read_status_includes_retry_and_last_success(tmp_path):
+    pusher = make_pusher(tmp_path / "state")
+    status = pusher.read_status()
+    assert status["retry"] is None and status["paused"] is None
+    assert status["last_success"] is None
+    pusher._schedule_retry(PushStatus(ok=False, reason="timer", error="x", stage="commit"))
+    retry = pusher.read_status()["retry"]
+    assert retry["stage"] == "commit" and retry["failures"] == 1
+
+
+def test_legacy_pause_state_migrates_to_immediate_retry(tmp_path):
+    """升级前遗留的 push-paused.json（等人工恢复）→ 立即到点的重试记录。"""
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    (state_dir / "push-paused.json").write_text(json.dumps({
+        "at": "2026-10-12T00:02:11+08:00",
+        "reason": "timer",
+        "error": "连接 NRF_EPD_3E1C 失败: ",
+        "stage": "connect",
+        "device": None,
+    }))
+    pusher = make_pusher(state_dir)
+    retry = pusher._read_retry()
+    assert retry["failures"] == 1 and retry["stage"] == "connect"
+    assert pusher._retry_due(retry) is True
+    assert not (state_dir / "push-paused.json").exists()
+    assert (state_dir / "push-retry.json").exists()
+
+
+def test_metrics_textfile_tracks_failure_and_success(tmp_path):
+    path = tmp_path / "metrics" / "epd-food.prom"
+    pusher = make_pusher(tmp_path / "state", textfile_path=path)
+    pusher._schedule_retry(PushStatus(ok=False, reason="timer", error="x", stage="connect"))
+    text = path.read_text()
+    assert "epd_food_push_failures 1" in text
+    assert "epd_food_push_retry_pending 1" in text
+
+    pusher._clear_retry(
+        PushStatus(ok=True, device="NRF_EPD_3E1C", finished_at="2026-10-27T09:00:00+08:00")
+    )
+    text = path.read_text()
+    assert "epd_food_push_failures 0" in text
+    assert "epd_food_push_retry_pending 0" in text
+    expected = int(datetime.fromisoformat("2026-10-27T09:00:00+08:00").timestamp())
+    assert f"epd_food_last_success_timestamp_seconds {expected}" in text
