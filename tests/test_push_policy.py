@@ -315,3 +315,13 @@ def test_device_probe_recorded_and_exported(tmp_path):
     assert "epd_food_device_boot_count 2" in text
     assert "epd_food_device_connect_count 9" in text
     assert "epd_food_probe_timestamp_seconds 0" not in text
+
+
+def test_probe_survives_successful_push(tmp_path):
+    """推送成功记 boot_count 时不能把 watch 探测结果覆盖掉（同一文件）。"""
+    pusher = make_pusher(tmp_path / "state")
+    pusher.record_device_probe({"device": "NRF_EPD_3E1C", "boot_count": 3, "uptime_s": 600})
+    pusher._record_boot_count({"boot_count": 3})
+    probe = pusher.read_status()["device_probe"]
+    assert probe["uptime_s"] == 600 and probe["boot_count"] == 3
+    assert pusher.recorded_boot_count() == 3

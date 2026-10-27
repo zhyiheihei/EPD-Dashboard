@@ -280,14 +280,20 @@ class Pusher:
             return
         try:
             self._cfg.state_dir.mkdir(parents=True, exist_ok=True)
-            _atomic_write_json(
-                self._panel_state_path,
+            # 合并写：同一文件还存着 watch 的探测结果，不能整个覆盖掉
+            current = {}
+            try:
+                current = json.loads(self._panel_state_path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                pass
+            current.update(
                 {
                     "boot_count": int(device_status["boot_count"]),
                     "device": device_status.get("device"),
                     "at": _iso_now(),
-                },
+                }
             )
+            _atomic_write_json(self._panel_state_path, current)
         except Exception as exc:
             log.warning("面板状态文件写入失败: %s", exc)
 
