@@ -93,6 +93,41 @@ def push_now(cfg: Config, db: Database, manual: bool = False, retry: bool = Fals
     return 1
 
 
+def push_if_device_needs_data(cfg: Config, db: Database) -> int:
+    """被动扫广播：设备说「面板内容丢了」就推一次全刷，否则直接退出。
+
+    设备上电/重启/OTA 后面板 RAM 清空，但服务不是每次都恰好知道它重启了；
+    固件把状态放在广播的厂商数据里，这条定时任务只扫描不连接（不扰设备），
+    扫到置位才去连一次。
+    """
+    from .discovery import DeviceError, read_panel_state
+    from .pusher import Pusher
+
+    try:
+        state = asyncio.run(read_panel_state(cfg))
+    except DeviceError as exc:
+        log.warning("面板状态扫描失败: %s", exc)
+        return 0
+    if state is None:
+        log.info("未扫描到设备广播，跳过")
+        return 0
+    if not state["needs_data"]:
+        log.debug("设备面板内容仍在（%s），无需推送", state["device"])
+        return 0
+
+    log.info("设备 %s 报告面板内容丢失（重启/OTA），立即全刷推送", state["device"])
+    db.ensure_schema()
+    status = asyncio.run(Pusher(cfg, db).push(reason="watch", force_full=True))
+    if status.ok:
+        log.info("重启后补推成功: %s 耗时 %ss", status.device, status.duration_s)
+        return 0
+    if status.ok is None:
+        log.info("未推送: %s", status.error)
+        return 0
+    log.error("重启后补推失败: %s", status.error)
+    return 1
+
+
 def ota_push(cfg: Config, db: Database, zip_path: str) -> int:
     """对设备执行 OTA 升级（包先入库再升级），成功返回 0。"""
     from pathlib import Path
@@ -138,6 +173,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="按退避定时器执行：仅在到点且有待重试失败时尝试，失败不报错退出",
     )
+    sub.add_parser("watch", help="扫广播，设备重启后面板内容丢失时自动补推")
     ota_parser = sub.add_parser("ota-push", help="对墨水屏执行固件 OTA 升级")
     ota_parser.add_argument("zip", help="nrfutil 生成的 *-ota.zip 包路径")
     args = parser.parse_args(argv)
@@ -157,6 +193,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "push-now":
         return push_now(cfg, db, manual=args.manual, retry=args.retry)
+    if args.command == "watch":
+        return push_if_device_needs_data(cfg, db)
     if args.command == "ota-push":
         return ota_push(cfg, db, args.zip)
     parser.error(f"未知命令: {args.command}")
