@@ -29,6 +29,9 @@ LOCK_WAIT_TIMEOUT = 90.0
 PUSH_HISTORY_KEEP = 100
 
 WEEKDAY_CN = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+# 跨天日程的回看窗口：CalDAV time-range 只返回与窗口有交集的事件，起点取
+# now 会把几天前开始、现在仍在进行的日程整条漏掉。
+SCHEDULE_LOOKBACK_DAYS = 60
 
 
 @dataclass
@@ -673,7 +676,11 @@ class Pusher:
                 if int(item.get("end_utc", item["start_utc"])) < now:
                     continue
                 schedules.append(
-                    ScheduleRecord(slot=len(schedules), start_utc=int(item["start_utc"]))
+                    ScheduleRecord(
+                        slot=len(schedules),
+                        start_utc=int(item["start_utc"]),
+                        end_utc=int(item.get("end_utc", item["start_utc"])),
+                    )
                 )
                 bitmaps.append(bytes.fromhex(item["bitmap"]))
         except Exception as exc:
@@ -686,7 +693,8 @@ class Pusher:
     ) -> tuple[list[protocol.ScheduleRecord], list[bytes]]:
         """拉取 CalDAV 日程并渲染标题位图（槽 0x00/0x01，320×20）。
 
-        展示策略是「最近 N 条」而非「最近 N 天内」：拉取窗口放大到
+        展示策略是「最近 N 条」而非「最近 N 天内」：拉取窗口向前回看
+        SCHEDULE_LOOKBACK_DAYS（跨天日程可能几天前已开始）、向后放到
         schedule_horizon_days 兜底，按开始时间排序取最近的几条，
         数月后的长期日程同样能上屏。
         拉取或解析失败降级沿用上次成功的日程（state_dir 缓存），
@@ -700,6 +708,9 @@ class Pusher:
 
         zone = ZoneInfo(self._cfg.timezone)
         now = datetime.now(timezone.utc)
+        # 回看窗口：跨天日程可能几天前就开始了，CalDAV 的 time-range 只看
+        # 与窗口有交集的事件，起点取 now 会把这些进行中的日程整条漏掉。
+        window_start = now - timedelta(days=SCHEDULE_LOOKBACK_DAYS)
         window_end = now + timedelta(days=self._cfg.schedule_horizon_days)
         try:
             client = CalDavClient(
@@ -710,7 +721,7 @@ class Pusher:
                     calendar=self._cfg.caldav_calendar,
                 )
             )
-            events = client.fetch_events(now, window_end, zone)
+            events = client.fetch_events(window_start, window_end, zone)
             # 只上面向未来的日程：已结束的不显示（进行中的仍算，按结束时间判断）
             upcoming = [e for e in events if (e.end_utc or e.start_utc) >= now]
             upcoming.sort(key=lambda e: e.start_utc)
@@ -726,13 +737,13 @@ class Pusher:
         bitmaps: list[bytes] = []
         ends: list[int] = []
         for index, event in enumerate(upcoming[: protocol.MAX_SCHEDULES]):
+            ends.append(int((event.end_utc or event.start_utc).timestamp()))
             schedules.append(
                 protocol.ScheduleRecord(
-                    slot=index, start_utc=int(event.start_utc.timestamp())
+                    slot=index,
+                    start_utc=int(event.start_utc.timestamp()),
+                    end_utc=ends[-1],
                 )
-            )
-            ends.append(
-                int((event.end_utc or event.start_utc).timestamp())
             )
             # 标题带上开始时间（如 “周五 周会”），纯标题无法区分远近日程
             local_start = event.start_utc.astimezone(zone)

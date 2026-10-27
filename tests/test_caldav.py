@@ -375,3 +375,30 @@ def test_schedule_slots_within_protocol_limits():
     assert len(schedules) <= protocol.MAX_SCHEDULES
     assert len(bitmaps) <= protocol.MAX_SCHEDULES
     assert [s.slot for s in schedules] == [0, 1]
+
+def test_pusher_includes_multiday_event_in_progress():
+    """跨天日程已经开始、当前处于持续时间内 → 必须上屏，且带上真实结束时间。"""
+    now = datetime.now(timezone.utc)
+    events = [
+        CalEvent(
+            summary="出差",
+            start_utc=now - timedelta(days=2),
+            end_utc=now + timedelta(days=1, hours=3),
+        ),
+        CalEvent(summary="已结束", start_utc=now - timedelta(days=5), end_utc=now - timedelta(days=4)),
+    ]
+    pusher = make_schedule_pusher(events)
+    schedules, _ = pusher._fetch_schedules()
+    assert len(schedules) == 1
+    assert schedules[0].start_utc == int(events[0].start_utc.timestamp())
+    assert schedules[0].end_utc == int(events[0].end_utc.timestamp())
+
+    # 线格式里结束时间就是真实的结束时间（不再硬编码 +1h）
+    frame = protocol.build_begin(
+        transaction=1, now_utc=int(now.timestamp()), timezone_minutes=480, schedules=schedules
+    )
+    offset = 13
+    start_on_wire = int.from_bytes(frame[offset + 2 : offset + 6], "big")
+    end_on_wire = int.from_bytes(frame[offset + 6 : offset + 10], "big")
+    assert start_on_wire == schedules[0].start_utc
+    assert end_on_wire == schedules[0].end_utc

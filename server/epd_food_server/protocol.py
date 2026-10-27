@@ -214,6 +214,7 @@ class FoodRecord:
 class ScheduleRecord:
     slot: int  # 0–1
     start_utc: int
+    end_utc: int | None = None  # None = 按 1 小时兜底（老调用方兼容）
 
 
 def build_begin(
@@ -242,7 +243,8 @@ def build_begin(
     for item in schedules:
         out += bytes([item.slot, 0x00])
         out += struct.pack(">I", item.start_utc & 0xFFFFFFFF)
-        out += struct.pack(">I", (item.start_utc + 3600) & 0xFFFFFFFF)
+        end_utc = item.end_utc if item.end_utc is not None else item.start_utc + 3600
+        out += struct.pack(">I", end_utc & 0xFFFFFFFF)
     for item in foods:
         out += bytes([item.slot, item.type])
         out += struct.pack(">I", item.expiry_utc & 0xFFFFFFFF)
