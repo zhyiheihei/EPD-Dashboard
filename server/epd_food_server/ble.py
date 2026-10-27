@@ -62,19 +62,7 @@ class EpdSession:
         self._client = BleakClient(device, timeout=self._cfg.connect_timeout)
         try:
             await self._client.connect()
-            # bleak v3 connect 返回不代表 GATT 解析完成；此刻写特征会报
-            # "Service Discovery has not been performed yet"。显式触发解析
-            # 并等待完成（get_services 内部阻塞到 Resolved）。
-            last_exc: Exception | None = None
-            for _ in range(10):
-                try:
-                    await self._client.get_services()
-                    break
-                except Exception as exc:
-                    last_exc = exc
-                    await asyncio.sleep(0.5)
-            if last_exc is not None and not self._client.services:
-                raise last_exc
+            await self._wait_services()
         except Exception as exc:
             raise DeviceError(f"连接 {self._device_name} 失败: {exc}", stage="connect") from exc
         try:
@@ -82,6 +70,26 @@ class EpdSession:
         except Exception as exc:
             await self.close()
             raise DeviceError(f"订阅通知失败: {exc}", stage="connect") from exc
+
+    async def _wait_services(self) -> None:
+        """等到 GATT 服务解析完成。
+
+        bleak 3.x 在 connect() 内部解析，公开的 get_services() 已不存在；
+        旧版本需要显式调用且可能滞后于连接完成。两者用同一轮询兼容。
+        """
+        get_services = getattr(self._client, "get_services", None)
+        last_exc: Exception | None = None
+        for _ in range(10):
+            try:
+                if get_services is not None:
+                    await get_services()
+                if self._client.services.services:
+                    return
+                last_exc = RuntimeError("GATT 服务尚未解析完成")
+            except Exception as exc:
+                last_exc = exc
+            await asyncio.sleep(0.5)
+        raise last_exc or RuntimeError("GATT 服务解析超时")
 
     async def read_device_status(self) -> dict | None:
         """读取诊断状态块；必须在 handshake 之后调用（需要 MTU 协商完成，
