@@ -249,7 +249,7 @@ class Pusher:
         return self._cfg.state_dir / "panel-state.json"
 
     def recorded_boot_count(self) -> int | None:
-        """上次成功推送时设备的 boot_count（重启检测的基准）。"""
+        """上次成功推送时设备的 boot_count（重启检测的基准之一）。"""
         try:
             data = json.loads(self._panel_state_path.read_text(encoding="utf-8"))
         except FileNotFoundError:
@@ -259,6 +259,18 @@ class Pusher:
             return None
         value = data.get("boot_count")
         return int(value) if isinstance(value, int) else None
+
+    def recorded_push_time(self) -> float | None:
+        """上次成功推送的 Unix 时间（与 uptime 比对可发现重启）。"""
+        try:
+            data = json.loads(self._last_success_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except Exception as exc:
+            log.warning("上次成功推送记录读取失败: %s", exc)
+            return None
+        parsed = _parse_iso(data.get("at"))
+        return parsed.timestamp() if parsed else None
 
     def _record_boot_count(self, device_status: dict | None) -> None:
         if not device_status or device_status.get("boot_count") is None:

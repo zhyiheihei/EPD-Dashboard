@@ -278,3 +278,23 @@ def test_boot_count_recorded_and_compared(monkeypatch, tmp_path):
     # 无状态块（老固件）不写、不崩
     pusher._record_boot_count(None)
     assert pusher.recorded_boot_count() == 5
+
+
+def test_uptime_reveals_reboot_when_boot_count_resets(tmp_path):
+    """DFU/断电重启会把 boot_count 打回 1：靠 uptime 与上次推送时间比对兜底。"""
+    import time as _time
+
+    pusher = make_pusher(tmp_path / "state")
+    pusher._record_boot_count({"boot_count": 1})
+    # 上次推送记录在 10 分钟前
+    (tmp_path / "state" / "last-success.json").write_text(json.dumps({
+        "at": _time.strftime("%Y-%m-%dT%H:%M:%S+08:00", _time.localtime(_time.time() - 600)),
+        "device": "NRF_EPD_3E1C",
+    }))
+    pushed_at = pusher.recorded_push_time()
+    assert pushed_at is not None
+    elapsed = _time.time() - pushed_at
+    # 设备只运行了 3 分钟 → 比 elapsed 短 → 判定重启
+    assert 180 + 120 < elapsed
+    # 设备已运行 20 分钟 → 没有重启
+    assert not (1200 + 120 < elapsed)

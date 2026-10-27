@@ -7,6 +7,7 @@ import asyncio
 import dataclasses
 import logging
 import sys
+import time
 
 from . import __version__
 from .config import Config, ensure_state_dir
@@ -114,15 +115,28 @@ def push_if_device_needs_data(cfg: Config, db: Database) -> int:
 
     db.ensure_schema()
     pusher = Pusher(cfg, db)
+    # 两个信号并用：boot_count 变了（软复位保留计数）；或设备上报的 uptime
+    # 比「距上次成功推送过去的时间」还短（DFU/断电重启会把 boot_count 清零
+    # 回 1，只看计数会漏）。120s 容差盖时钟漂移与推送耗时。
     boot = state.get("boot_count")
+    uptime = state.get("uptime_s")
     seen = pusher.recorded_boot_count()
-    if boot is not None and boot == seen:
-        log.debug("设备 %s 未重启（boot=%s），无需补推", state.get("device"), boot)
+    pushed_at = pusher.recorded_push_time()
+    rebooted = boot is not None and boot != seen
+    if not rebooted and uptime is not None and pushed_at is not None:
+        elapsed = time.time() - pushed_at
+        rebooted = uptime + 120 < elapsed
+    if not rebooted:
+        log.debug(
+            "设备 %s 未重启（boot=%s uptime=%ss），无需补推",
+            state.get("device"), boot, uptime,
+        )
         return 0
 
     log.info(
-        "设备 %s 疑似重启（boot=%s，上次已推 boot=%s），全刷补推",
-        state.get("device"), boot, seen,
+        "设备 %s 重启过（boot=%s 上次 %s，uptime=%ss，上次推送 %ss 前），全刷补推",
+        state.get("device"), boot, seen, uptime,
+        int(time.time() - pushed_at) if pushed_at else None,
     )
     status = asyncio.run(pusher.push(reason="watch", force_full=True))
     if status.ok:
