@@ -544,12 +544,20 @@ class Pusher:
         return self._cfg.state_dir / "schedules-cache.json"
 
     def _save_schedule_cache(
-        self, schedules: list[ScheduleRecord], bitmaps: list[bytes]
+        self,
+        schedules: list[ScheduleRecord],
+        bitmaps: list[bytes],
+        ends: list[int] | None = None,
     ) -> None:
         """成功拉取后落盘，供下次拉取失败时沿用（避免食品变更推送擦掉日程栏）。"""
+        ends = ends or []
         payload = [
-            {"start_utc": s.start_utc, "bitmap": bitmap.hex()}
-            for s, bitmap in zip(schedules, bitmaps)
+            {
+                "start_utc": s.start_utc,
+                "end_utc": ends[index] if index < len(ends) else s.start_utc,
+                "bitmap": bitmap.hex(),
+            }
+            for index, (s, bitmap) in enumerate(zip(schedules, bitmaps))
         ]
         try:
             self._cfg.state_dir.mkdir(parents=True, exist_ok=True)
@@ -567,10 +575,14 @@ class Pusher:
             return [], []
         schedules: list[ScheduleRecord] = []
         bitmaps: list[bytes] = []
+        now = int(time.time())
         try:
-            for index, item in enumerate(data.get("schedules", [])):
+            for item in data.get("schedules", []):
+                # 拉取失败沿用缓存，但过期条目（已结束）不再上屏
+                if int(item.get("end_utc", item["start_utc"])) < now:
+                    continue
                 schedules.append(
-                    ScheduleRecord(slot=index, start_utc=int(item["start_utc"]))
+                    ScheduleRecord(slot=len(schedules), start_utc=int(item["start_utc"]))
                 )
                 bitmaps.append(bytes.fromhex(item["bitmap"]))
         except Exception as exc:
@@ -608,7 +620,8 @@ class Pusher:
                 )
             )
             events = client.fetch_events(now, window_end, zone)
-            upcoming = [e for e in events if e.start_utc >= now]
+            # 只上面向未来的日程：已结束的不显示（进行中的仍算，按结束时间判断）
+            upcoming = [e for e in events if (e.end_utc or e.start_utc) >= now]
             upcoming.sort(key=lambda e: e.start_utc)
         except Exception as exc:
             cached = self._load_schedule_cache()
@@ -620,11 +633,15 @@ class Pusher:
 
         schedules: list[protocol.ScheduleRecord] = []
         bitmaps: list[bytes] = []
+        ends: list[int] = []
         for index, event in enumerate(upcoming[: protocol.MAX_SCHEDULES]):
             schedules.append(
                 protocol.ScheduleRecord(
                     slot=index, start_utc=int(event.start_utc.timestamp())
                 )
+            )
+            ends.append(
+                int((event.end_utc or event.start_utc).timestamp())
             )
             # 标题带上开始时间（如 “周五 周会”），纯标题无法区分远近日程
             local_start = event.start_utc.astimezone(zone)
@@ -637,7 +654,7 @@ class Pusher:
                     self._font,
                 )
             )
-        self._save_schedule_cache(schedules, bitmaps)
+        self._save_schedule_cache(schedules, bitmaps, ends)
         return schedules, bitmaps
 
     def _schedules_fingerprint_path(self) -> Path:

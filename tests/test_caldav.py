@@ -283,6 +283,66 @@ def test_pusher_fetch_failure_reuses_cache():
     assert cached_bitmaps == bitmaps
 
 
+def test_pusher_drops_past_events_and_keeps_ongoing():
+    """只上未来日程：已结束的不显示；仍在进行中的（结束时间未到）保留。"""
+    now = datetime.now(timezone.utc)
+    events = [
+        CalEvent(
+            summary="昨天的会",
+            start_utc=now - timedelta(days=1),
+            end_utc=now - timedelta(hours=20),
+        ),
+        CalEvent(
+            summary="进行中的会",
+            start_utc=now - timedelta(hours=1),
+            end_utc=now + timedelta(hours=1),
+        ),
+        CalEvent(
+            summary="明天的会",
+            start_utc=now + timedelta(days=1),
+            end_utc=now + timedelta(days=1, hours=1),
+        ),
+    ]
+    pusher = make_schedule_pusher(events)
+    schedules, _ = pusher._fetch_schedules()
+    assert [s.start_utc for s in schedules] == [
+        int(events[1].start_utc.timestamp()),
+        int(events[2].start_utc.timestamp()),
+    ]
+
+
+def test_schedule_cache_skips_expired_entries():
+    """拉取失败沿用缓存时，已结束的旧条目不能再上屏。"""
+    now = datetime.now(timezone.utc)
+    pusher = make_schedule_pusher(
+        [
+            CalEvent(
+                summary="明天的会",
+                start_utc=now + timedelta(days=1),
+                end_utc=now + timedelta(days=1, hours=2),
+            )
+        ]
+    )
+    pusher._fetch_schedules()
+    # 人为塞一条已过期条目进缓存
+    path = pusher._cfg.state_dir / "schedules-cache.json"
+    import json as _json
+
+    data = _json.loads(path.read_text())
+    data["schedules"].append(
+        {"start_utc": int((now - timedelta(days=2)).timestamp()),
+         "end_utc": int((now - timedelta(days=1)).timestamp()),
+         "bitmap": data["schedules"][0]["bitmap"]}
+    )
+    path.write_text(_json.dumps(data))
+
+    failing = make_schedule_pusher([], fail=True)
+    failing._cfg.state_dir = pusher._cfg.state_dir
+    cached, _ = failing._fetch_schedules()
+    assert len(cached) == 1
+    assert cached[0].start_utc == int((now + timedelta(days=1)).timestamp())
+
+
 def test_pusher_degrades_on_caldav_failure():
     pusher = make_schedule_pusher([], fail=True)
     schedules, bitmaps = pusher._fetch_schedules()

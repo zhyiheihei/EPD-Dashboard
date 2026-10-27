@@ -179,3 +179,14 @@ def test_parse_mtu_text():
     assert parse_mtu_text(b"mtu=247\n") == 247
     assert parse_mtu_text(b"hello") is None
     assert parse_mtu_text(b"mtu=") is None
+
+
+def test_parse_status_response_tolerates_truncated_tail():
+    """固件 v28 的 19B 应答缓冲会把 STATUS 截到 14B：尾部字段置 None 而不是抛异常。"""
+    frame = bytes.fromhex("280100010000111a00000002000a")
+    resp = protocol.Response(protocol=1, transaction=0, command=protocol.CMD_STATUS, status=0, payload=frame)
+    parsed = protocol.parse_status_response(resp)
+    assert parsed["boot_count"] == 1
+    assert parsed["connect_count"] == 10
+    assert parsed["last_disconnect_reason"] is None
+    assert parsed["model_id"] is None

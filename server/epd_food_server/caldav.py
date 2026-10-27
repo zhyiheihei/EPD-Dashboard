@@ -46,6 +46,7 @@ class CalDavError(RuntimeError):
 class CalEvent:
     summary: str
     start_utc: datetime  # 已转为带 tzinfo 的绝对时间
+    end_utc: datetime | None = None  # 事件结束（含跨日/进行中判断）
 
 
 @dataclass(frozen=True)
@@ -199,7 +200,7 @@ def _build_event(
         .replace("\\N", " ")
     )
     return [
-        CalEvent(summary=summary, start_utc=instance)
+        CalEvent(summary=summary, start_utc=instance, end_utc=instance + duration)
         for instance in starts
         if instance + duration >= window_start_utc and instance <= window_end_utc
     ]

@@ -169,12 +169,11 @@ def parse_status_response(resp: Response) -> dict:
     uptime_s(32) | resetreas(32) | connect_count(16) | last_disconnect |
     model_id。"""
     p = resp.payload
-    # 默认 23B MTU 下应答帧会截到 14B（app_version/proto/boot_count/
-    # uptime/resetreas/connect_count 12 字节 + 若干位）；session 针对
-    # MTU<20 只提示不计失败，MTU>=20 时严格要求全帧 15B+。
-    min_len = 14 if len(p) < 20 else 16
-    if len(p) < min_len:
-        raise ProtocolError(f"STATUS 载荷不足 {min_len} 字节: {p.hex()}")
+    # 默认 23B MTU、以及固件 v28 的 19B 应答缓冲都会把帧截短（14B 以上仍含
+    # boot_count/uptime/resetreas/connect_count）；缺的尾部字段置 None，
+    # 不要因诊断字段不齐就让整次推送失败。
+    if len(p) < 14:
+        raise ProtocolError(f"STATUS 载荷不足 14 字节: {p.hex()}")
     resetreas = struct.unpack_from(">I", p, 8)[0]
     return {
         "firmware": p[0],
@@ -183,8 +182,8 @@ def parse_status_response(resp: Response) -> dict:
         "reset_reason": hex(resetreas),
         "reset_reason_names": decode_reset_reason(resetreas),
         "connect_count": struct.unpack_from(">H", p, 12)[0],
-        "last_disconnect_reason": hex(p[14]),
-        "model_id": p[15],
+        "last_disconnect_reason": hex(p[14]) if len(p) >= 15 else None,
+        "model_id": p[15] if len(p) >= 16 else None,
     }
 
 def parse_caps_response(resp: Response) -> CapsInfo:
