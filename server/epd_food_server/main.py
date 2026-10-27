@@ -94,11 +94,11 @@ def push_now(cfg: Config, db: Database, manual: bool = False, retry: bool = Fals
 
 
 def push_if_device_needs_data(cfg: Config, db: Database) -> int:
-    """被动扫广播：设备说「面板内容丢了」就推一次全刷，否则直接退出。
+    """探一下设备状态块：重启过（boot_count 变了）就全刷补推，否则只读不推。
 
-    设备上电/重启/OTA 后面板 RAM 清空，但服务不是每次都恰好知道它重启了；
-    固件把状态放在广播的厂商数据里，这条定时任务只扫描不连接（不扰设备），
-    扫到置位才去连一次。
+    面板内容只在设备 RAM 里，重启/OTA 后就空了；服务端只知道「上次成功
+    推送」。这里连一次读 16 字节状态块立即断开（不传图形），比对 boot_count
+    即可发现重启，不用等到下一次 00:00 推送。
     """
     from .discovery import DeviceError, read_panel_state
     from .pusher import Pusher
@@ -106,18 +106,25 @@ def push_if_device_needs_data(cfg: Config, db: Database) -> int:
     try:
         state = asyncio.run(read_panel_state(cfg))
     except DeviceError as exc:
-        log.warning("面板状态扫描失败: %s", exc)
+        log.warning("面板状态探测失败: %s", exc)
         return 0
     if state is None:
-        log.info("未扫描到设备广播，跳过")
-        return 0
-    if not state["needs_data"]:
-        log.debug("设备面板内容仍在（%s），无需推送", state["device"])
+        log.info("设备未在广播/不可达，跳过")
         return 0
 
-    log.info("设备 %s 报告面板内容丢失（重启/OTA），立即全刷推送", state["device"])
     db.ensure_schema()
-    status = asyncio.run(Pusher(cfg, db).push(reason="watch", force_full=True))
+    pusher = Pusher(cfg, db)
+    boot = state.get("boot_count")
+    seen = pusher.recorded_boot_count()
+    if boot is not None and boot == seen:
+        log.debug("设备 %s 未重启（boot=%s），无需补推", state.get("device"), boot)
+        return 0
+
+    log.info(
+        "设备 %s 疑似重启（boot=%s，上次已推 boot=%s），全刷补推",
+        state.get("device"), boot, seen,
+    )
+    status = asyncio.run(pusher.push(reason="watch", force_full=True))
     if status.ok:
         log.info("重启后补推成功: %s 耗时 %ss", status.device, status.duration_s)
         return 0

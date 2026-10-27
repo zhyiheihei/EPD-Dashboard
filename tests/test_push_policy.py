@@ -264,3 +264,17 @@ def test_metrics_textfile_tracks_failure_and_success(tmp_path):
     assert "epd_food_push_retry_pending 0" in text
     expected = int(datetime.fromisoformat("2026-10-27T09:00:00+08:00").timestamp())
     assert f"epd_food_last_success_timestamp_seconds {expected}" in text
+
+
+def test_boot_count_recorded_and_compared(monkeypatch, tmp_path):
+    """成功推送后记录 boot_count；重启（boot_count 变化）才需要补推。"""
+    state_dir = tmp_path / "state"
+    pusher = make_pusher(state_dir)
+    assert pusher.recorded_boot_count() is None
+    pusher._record_boot_count({"boot_count": 5, "device": "NRF_EPD_3E1C"})
+    assert pusher.recorded_boot_count() == 5
+    # 重启后 boot_count 变 6 → 与记录不同，watch 会补推
+    assert pusher.recorded_boot_count() != 6
+    # 无状态块（老固件）不写、不崩
+    pusher._record_boot_count(None)
+    assert pusher.recorded_boot_count() == 5

@@ -14,10 +14,6 @@ from bleak import BleakClient, BleakScanner
 from . import protocol
 from .config import Config
 
-# 固件在广播里用厂商数据（company id 0xFFFF）携带面板状态：首字节 bit0 =
-# 「面板内容已丢失，需要服务端重推」（上电/重启/OTA 后置 1，COMMIT 成功后清 0）。
-PANEL_STATE_COMPANY_ID = 0xFFFF
-
 
 class DeviceError(RuntimeError):
     """BLE 层错误（扫描不到设备、连接失败等），stage 标记失败阶段。"""
@@ -60,43 +56,29 @@ async def find_app_device(cfg: Config):
 
 
 async def read_panel_state(cfg: Config) -> dict | None:
-    """被动扫一下广播，读出「面板内容需要重推」标志（0xFFFF 厂商数据首字节）。
+    """连接一次读出面板状态块（含 boot_count），用于判断设备是否重启过。
 
-    只扫描不连接：设备上电/重启/OTA 后 RAM 里的面板内容就没了，固件把
-    这个状态放在广播里，服务端定期扫到就知道该推了，不必为了探活去连设备。
-    未找到设备返回 None（不在范围/已休眠）。
+    面板内容只在设备 RAM 里：上电/重启/OTA 后面板就空了，而服务端只知道
+    「上次推送成功」。这里连一次、读 16 字节状态块、立即断开（不做任何
+    图形传输，不扰动面板），拿 boot_count 跟上次记录比对即可发现重启。
+    固件闪存区已贴顶（0xE000 预算，v29 = 0xDFE8），所以不在广播里加料。
+    设备不在范围/未广播时返回 None。
     """
-    match = _match_app_device(cfg)
-    found: list[tuple[str, dict]] = []
-
-    def on_detect(device, advertisement) -> None:
-        if found or not match(device, advertisement):
-            return
-        manuf = getattr(advertisement, "manufacturer_data", None) or {}
-        payload = manuf.get(PANEL_STATE_COMPANY_ID, b"")
-        found.append(
-            (
-                device.name or device.address,
-                {
-                    "needs_data": bool(payload and payload[0] & 1),
-                    "manufacturer_data": payload.hex(),
-                },
-            )
-        )
+    from .ble import EpdSession
 
     try:
-        scanner = BleakScanner(detection_callback=on_detect)
-        await scanner.start()
-        try:
-            await asyncio.sleep(cfg.scan_timeout)
-        finally:
-            await scanner.stop()
+        async with EpdSession(cfg) as session:
+            await session.handshake()
+            status = await session.read_device_status()
+            if status is None:
+                return None
+            return {"device": session.device_name, **status}
+    except DeviceError as exc:
+        if exc.stage in ("scan", "connect"):
+            return None
+        raise
     except Exception as exc:
-        raise DeviceError(f"BLE 扫描失败: {exc}", stage="scan") from exc
-    if not found:
-        return None
-    name, state = found[0]
-    return {"device": name, **state}
+        raise DeviceError(f"读取面板状态失败: {exc}", stage="status") from exc
 
 
 _version_cache: tuple[float, str, int] | None = None

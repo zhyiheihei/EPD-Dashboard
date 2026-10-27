@@ -242,6 +242,40 @@ class Pusher:
                 log.warning("上次成功推送记录写入失败: %s", exc)
         self._write_metrics()
 
+    # ---------- 设备重启检测（面板内容只在 RAM） ----------
+
+    @property
+    def _panel_state_path(self) -> Path:
+        return self._cfg.state_dir / "panel-state.json"
+
+    def recorded_boot_count(self) -> int | None:
+        """上次成功推送时设备的 boot_count（重启检测的基准）。"""
+        try:
+            data = json.loads(self._panel_state_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except Exception as exc:
+            log.warning("面板状态文件读取失败: %s", exc)
+            return None
+        value = data.get("boot_count")
+        return int(value) if isinstance(value, int) else None
+
+    def _record_boot_count(self, device_status: dict | None) -> None:
+        if not device_status or device_status.get("boot_count") is None:
+            return
+        try:
+            self._cfg.state_dir.mkdir(parents=True, exist_ok=True)
+            _atomic_write_json(
+                self._panel_state_path,
+                {
+                    "boot_count": int(device_status["boot_count"]),
+                    "device": device_status.get("device"),
+                    "at": _iso_now(),
+                },
+            )
+        except Exception as exc:
+            log.warning("面板状态文件写入失败: %s", exc)
+
     def _last_success_at(self) -> str | None:
         try:
             return json.loads(self._last_success_path.read_text(encoding="utf-8")).get("at")
@@ -456,6 +490,9 @@ class Pusher:
                         records, bitmaps, schedules, schedule_bitmaps, need_full
                     )
                     status.ok = True
+                    # 面板内容已落屏：记下这只设备当前的 boot_count，
+                    # watch 定时探测靠它发现「设备重启过、面板是空的」
+                    self._record_boot_count(status.device_status)
                     last_error = None
                     break
                 except (DeviceError, ProtocolError) as exc:
